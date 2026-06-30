@@ -47,70 +47,58 @@ watch(() => props.isOpen, async (abierto) => {
 
     cargandoFinanzas.value = true
 
-    // ─── LÓGICA INTELIGENTE: ¿ES UN CICLO DE TRATAMIENTO O CITA SUELTA? ───
+    // ─── LÓGICA INTELIGENTE UNIFICADA ───
     if (props.sesion.idPaquete) {
-      // 1. Buscamos el precio original en la tabla PAQUETE
-      const { data: paqueteData, error } = await supabase
-        .from('Paquete')
-        .select('monto_total')
-        .eq('idPaquete', props.sesion.idPaquete)
-        .single()
+      
+      // 1. ES UN PAQUETE (Aplica igual para la Evaluación o la Sesión 5)
+      const totalPaquete = Number(props.sesion.monto_total_paquete || 0);
+      const abonado = Number(props.sesion.total_pagado_paquete || 0);
 
-      if (paqueteData && !error) {
-        // 👇 SOLUCIÓN: Sumamos todos los recibos reales vinculados a este paquete
-        const { data: pagosPrevios } = await supabase
-          .from('Pago')
-          .select('monto')
-          .eq('idPaquete', props.sesion.idPaquete)
+      tratamientoAsociado.value = {
+        monto_total: totalPaquete,
+        total_sesiones: props.sesion.total_sesiones_paquete
+      };
 
-        // Calculamos cuánto ha abonado en total sumando el historial real
-        const totalAbonado = pagosPrevios
-          ? pagosPrevios.reduce((sum, p) => sum + Number(p.monto), 0)
-          : 0
+      // Calculamos la deuda real
+      saldoPendiente.value = Math.max(0, totalPaquete - abonado);
+      montoIngresado.value = saldoPendiente.value;
 
-        tratamientoAsociado.value = paqueteData
-
-        // El saldo pendiente es el precio del paquete menos lo que sumó la auditoría
-        saldoPendiente.value = Math.max(0, Number(paqueteData.monto_total) - totalAbonado)
-
-        // Sugerimos el saldo restante automáticamente (Ej: 250 - 130 = 120)
-        montoIngresado.value = saldoPendiente.value
-      }
-      const tipoABuscar = props.sesion.tipo === 'masaje' ? 'masaje' : 'sesion_suelta'
-      // 2. Es una cita suelta o evaluación (Sin Tratamiento)
-      const { data: catData } = await supabase
-        .from('Catalogo_Servicio')
-        .select('precio')
-        .eq('tipo', tipoABuscar)
-        .eq('activo', true)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
-
-      if (catData) {
-        precioSesionSuelta.value = Number(catData.precio)
-      }
-
-      // Evaluamos si cobramos o es gratis
+    } else {
+      
+      // 2. ES UNA SESIÓN SUELTA (Sin paquete)
       if (props.sesion.tipo === 'evaluacion') {
-        montoIngresado.value = 0
-        saldoPendiente.value = 0
+        // Evaluación suelta sin paquete (Cortesía total)
+        saldoPendiente.value = 0;
+        montoIngresado.value = 0;
       } else {
-        // 👇 ¡NUEVA LÓGICA DE AUDITORÍA EN VIVO! 👇
-        // Consultamos la tabla Pago para ver si esta sesión ya tiene abonos previos
+        // Sesión suelta normal o masaje (Buscamos precio en catálogo)
+        const tipoABuscar = props.sesion.tipo === 'masaje' ? 'masaje' : 'sesion_suelta'
+        
+        const { data: catData } = await supabase
+          .from('Catalogo_Servicio')
+          .select('precio')
+          .eq('tipo', tipoABuscar)
+          .eq('activo', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single()
+
+        if (catData) {
+          precioSesionSuelta.value = Number(catData.precio)
+        }
+
+        // Buscamos si ya dejó algún adelanto para esta cita suelta
         const { data: pagosPrevios } = await supabase
           .from('Pago')
           .select('monto')
           .eq('idSesion', props.sesion.idSesion)
 
-        // Sumamos todos los adelantos registrados en caja para esta cita
         const totalAbonado = pagosPrevios
           ? pagosPrevios.reduce((sum, p) => sum + Number(p.monto), 0)
           : 0
 
-        // El saldo pendiente real es el precio total menos lo que ya pagó
         saldoPendiente.value = Math.max(0, precioSesionSuelta.value - totalAbonado)
-        montoIngresado.value = saldoPendiente.value // Sugiere automáticamente los S/ 30.00 restantes
+        montoIngresado.value = saldoPendiente.value 
       }
     }
 
@@ -126,16 +114,19 @@ watch(tipoPago, (val) => {
 const handleSubmit = () => {
   const monto = Number(montoIngresado.value)
 
-  if (!validatePaymentAmount(monto) && props.sesion.tipo !== 'evaluacion') {
-    showAlert('El monto debe ser mayor a S/ 0.00', 'error')
+  // 1. Bloqueo de pagos vacíos o negativos (Aplica para TODO, excepto si realmente debe 0)
+  if (saldoPendiente.value > 0 && (!validatePaymentAmount(monto) || monto <= 0)) {
+    showAlert('El monto a cobrar debe ser mayor a S/ 0.00', 'error')
     return
   }
 
-  if (tratamientoAsociado.value && !validatePaymentAmountNotExceeds(monto, saldoPendiente.value)) {
-    showAlert(`No puedes cobrar más que el saldo pendiente: S/ ${saldoPendiente.value.toFixed(2)}`, 'error')
+  // 2. Bloqueo de sobrecobros UNIVERSAL (Aplica para paquetes, masajes y sesiones sueltas)
+  if (monto > saldoPendiente.value) {
+    showAlert(`Error: El monto máximo a cobrar es el saldo pendiente (S/ ${saldoPendiente.value.toFixed(2)})`, 'error')
     return
   }
 
+  // 3. Validación de Transferencias
   if (metodoPago.value === 'transferencia' && !numeroOperacion.value.trim()) {
     showAlert('Debes ingresar el número de operación para transferencias', 'error')
     return
@@ -145,7 +136,7 @@ const handleSubmit = () => {
   emit('submit', {
     idSesion: props.sesion.idSesion,
     idPaciente: props.sesion.idPaciente,
-    idPaquete: props.sesion.idPaquete || null, // Clave para actualizar el ciclo
+    idPaquete: props.sesion.idPaquete || null,
     monto: monto,
     metodoPago: metodoPago.value,
     numeroOperacion: numeroOperacion.value,
@@ -183,7 +174,7 @@ const handleSubmit = () => {
               </div>
               <div>
                 <span class="lbl">Abonado:</span>
-                <span class="val text-green">S/ {{ Number(tratamientoAsociado.monto_pagado || 0).toFixed(2) }}</span>
+                <span class="val text-green">S/ {{ Number(sesion.total_pagado_paquete || 0).toFixed(2) }}</span>
               </div>
             </div>
 

@@ -224,27 +224,29 @@ const accionesDe = (sesion) => {
   const enSala = !!sesion?.paciente_en_sala;
   const esMasaje = sesion?.tipo === 'masaje';
 
-  // Es una cita gratis SOLO si es evaluación y NO tiene un paquete asociado
-  const esEvaluacionSuelta = sesion?.tipo === 'evaluacion' && !sesion?.idPaquete;
+  // Variables financieras que nos envía la nueva vista SQL
+  const tieneDeudaPaquete = sesion?.paquete_tiene_deuda;
+  const checkinPermitido = sesion?.puede_checkin_financiero;
 
-  // MUESTRA EL BOTÓN DE PAGO SI:
-  // 1. La sesión tiene deuda (pendiente / parcial)
-  // 2. O es la evaluación inicial de un paquete (permite cobrar la deuda global por adelantado)
-  const tieneDeudaIndividual = ['pendiente', 'parcial'].includes(sesion?.estado_pago) && sesion?.tipo !== 'evaluacion';
-  const esEvaluacionDePaquete = sesion?.tipo === 'evaluacion' && !!sesion?.idPaquete && sesion?.paquete_tiene_deuda;
-  
-  const mostrarBotonPago = (tieneDeudaIndividual || esEvaluacionDePaquete) && !esEvaluacionSuelta && sesion?.estado_pago !== 'pagado';
+  const esEvaluacionSuelta = sesion?.tipo === 'evaluacion' && !sesion?.idPaquete;
+  const tieneDeudaIndividual = ['pendiente', 'parcial'].includes(sesion?.estado_pago) && !sesion?.idPaquete;
+
+  // Mostramos el botón de pago si hay alguna deuda y NO es una evaluación suelta gratis
+  const mostrarBotonPago = (tieneDeudaIndividual || (tieneDeudaPaquete && !esEvaluacionSuelta));
 
   const yaFueReprogramada = !!(sesion?.idSesionOriginal || sesion?.id_sesion_original);
-  const tratamientoConcluido = !!sesion?.tratamiento_finalizado; 
+  const tratamientoConcluido = !!sesion?.tratamiento_finalizado;
 
   return {
     puedeConfirmarAsistencia: puedeGestionar.value && e === 'reservada',
-    
-    // 👇 Aplicamos la nueva regla inteligente para el cobro
+
+    // 👇 EL CANDADO MAESTRO: Solo permite Check-in si la BD dice que el pago proporcional alcanza
+    puedeCheckIn: puedeGestionar.value && e === 'agendada' && !enSala && checkinPermitido,
+
+    // 👇 UN SOLO BOTÓN DE PAGO: Se muestra si hay deuda. 
+    // Además, si el Check-in está bloqueado por falta de pago, este botón es su única salida.
     puedeConfirmarPago: puedeGestionar.value && ['reservada', 'agendada', 'atendida'].includes(e) && mostrarBotonPago,
-    
-    puedeCheckIn: puedeGestionar.value && e === 'agendada' && !enSala,
+
     puedeInasistencia: puedeGestionar.value && e === 'agendada' && !enSala,
     puedeAtender: esFisioterapeuta.value && e === 'agendada' && enSala && !tieneDeudaIndividual,
     puedeReprogramar: puedeGestionar.value && ['reservada', 'agendada'].includes(e) && !yaFueReprogramada && !enSala,

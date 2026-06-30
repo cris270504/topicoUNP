@@ -123,12 +123,17 @@ export function useCitas() {
             // Consultamos la vista unificada
             let query = supabase.from('vw_citas_detalladas')
                 .select(`
-                    idSesion, fecha_hora, estado, tipo, idTratamiento, paciente_en_sala, 
+                    idSesion, fecha_hora, estado, tipo, numero_sesion, idTratamiento, paciente_en_sala, 
                     estado_pago, fisio_nombres, idSesionOriginal, fisio_apellidos, 
                     fisio_especialidad, paciente_nombres, paciente_apellidos, paciente_celular, 
                     idPaciente, idFisioterapeuta, idPaquete, expires_at, 
-                    tratamiento_finalizado, paquete_tiene_deuda 
-                `) // 👈 Agregado al final
+                    tratamiento_finalizado, paquete_tiene_deuda,
+                    puede_checkin_financiero, monto_pendiente_proporcional,
+                    monto_total_paquete, total_pagado_paquete, monto_total_paquete, 
+                    total_sesiones_paquete,
+                    precio_por_sesion, 
+                    saldo_exigido_acumulado
+                `)
             // ✅ SEGURIDAD: Solo filtrar por userId si está confirmado
             if (esPaciente.value && userId.value) {
                 query = query.eq('idPaciente', userId.value)
