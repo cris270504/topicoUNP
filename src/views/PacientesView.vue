@@ -9,7 +9,8 @@ const { showAlert, showConfirm } = useAlert()
 const router = useRouter()
 
 const irAHistoriaClinica = (id) => {
-  router.push({ name: 'HistoriaClinica', params: { idPaciente: id } })
+    // Aseguramos que el nombre del parámetro coincida exactamente con la ruta configurada
+    router.push({ name: 'HistoriaClinica', params: { idPaciente: id } })
 }
 
 // Estados operativos
@@ -21,13 +22,16 @@ const selectedPaciente = ref(null)
 const fetchPacientes = async () => {
     try {
         const { data, error } = await supabase
-            .from('Paciente')
+            .from('paciente') // 👈 Minúsculas para evitar el error 404
             .select(`
-                idPaciente,
+                idpaciente,
+                codigo_universitario,
+                tipo_usuario,
+                facultad_escuela,
                 direccion,
                 created_at,
-                Persona (
-                  idPersona,
+                persona (
+                  idpersona,
                   nombres,
                   apellidos,
                   tipo_documento,
@@ -49,9 +53,13 @@ const filteredPacientes = computed(() => {
     if (!query) return pacientesList.value
 
     return pacientesList.value.filter(p => {
-        const nombreCompleto = `${p.Persona?.nombres} ${p.Persona?.apellidos}`.toLowerCase()
-        const doc = p.Persona?.numero_documento || ''
-        return nombreCompleto.includes(query) || doc.includes(query)
+        // Acceso a los objetos anidados también en minúsculas
+        const nombreCompleto = `${p.persona?.nombres} ${p.persona?.apellidos}`.toLowerCase()
+        const doc = p.persona?.numero_documento || ''
+        const codigo = p.codigo_universitario?.toLowerCase() || ''
+        
+        // Ahora el buscador también detecta por código universitario
+        return nombreCompleto.includes(query) || doc.includes(query) || codigo.includes(query)
     })
 })
 
@@ -67,19 +75,19 @@ const openEditForm = (paciente) => {
 }
 
 const handleDeletePaciente = async (idPersonaReal) => {
-    const confirmado = await showConfirm('¿Estás seguro de eliminar este paciente? Esto borrará permanentemente sus accesos al sistema y su historial.')
+    const confirmado = await showConfirm('¿Estás seguro de eliminar este paciente? Esto borrará permanentemente sus accesos al sistema, sus citas y su historial médico.')
 
     if (!confirmado) return
 
     try {
-        const { error } = await supabase
-            .from('Persona')
-            .delete()
-            .eq('idPersona', idPersonaReal)
+        // Llamamos a la función RPC que acabamos de crear en la base de datos
+        const { error } = await supabase.rpc('eliminar_usuario_completo', {
+            p_id_usuario: idPersonaReal
+        })
 
         if (error) throw error
 
-        showAlert('Se elimnó al paciente del sistema. ', 'success')
+        showAlert('Se eliminó al paciente y todo su acceso del sistema.', 'success')
         await fetchPacientes()
     } catch (error) {
         showAlert('No se pudo eliminar el registro: ' + error.message, 'error')
@@ -97,7 +105,7 @@ onMounted(() => {
         <div class="action-header">
             <div class="header-text">
                 <h2>Gestión de Pacientes</h2>
-                <p>Control de admisiones y gestión de accesos para pacientes de MovyBalance.</p>
+                <p>Control de admisiones de la comunidad universitaria (Tópico UNP).</p>
             </div>
             <button class="primary-btn" @click="openCreateForm">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
@@ -111,8 +119,8 @@ onMounted(() => {
 
         <div class="data-card"
             style="padding: 16px; border-bottom: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0;">
-            <div class="input-group" style="max-width: 400px;">
-                <input v-model="searchQuery" type="text" placeholder="Buscar por nombre o documento..."
+            <div class="input-group" style="max-width: 450px;">
+                <input v-model="searchQuery" type="text" placeholder="Buscar por nombre, documento o código UNP..."
                     style="background: #ffffff;" />
             </div>
         </div>
@@ -123,37 +131,44 @@ onMounted(() => {
                     <thead>
                         <tr>
                             <th>Paciente</th>
+                            <th>Código UNP</th>
+                            <th>Facultad / Escuela</th>
                             <th>Documento</th>
                             <th>Celular</th>
-                            <th>Dirección Residencial</th>
                             <th>Acciones</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-for="paciente in filteredPacientes" :key="paciente.idPaciente">
-                            <td class="patient-name">
-                                {{ paciente.Persona?.nombres }} {{ paciente.Persona?.apellidos }}
-                            </td>
-                            <td>{{ paciente.Persona?.tipo_documento }}: {{ paciente.Persona?.numero_documento }}</td>
-                            <td>{{ paciente.Persona?.celular || '-' }}</td>
-                            <td>{{ paciente.direccion || '-' }}</td>
+                        <tr v-for="paciente in filteredPacientes" :key="paciente.idpaciente">
                             <td>
-                                <button @click="irAHistoriaClinica(paciente.idPaciente)" class="btn-secondary"
+                                <span class="patient-name">
+                                    {{ paciente.persona?.nombres }} {{ paciente.persona?.apellidos }}
+                                </span>
+                                <span class="patient-detail" style="text-transform: capitalize;">
+                                    {{ paciente.tipo_usuario }} 
+                                </span>
+                            </td>
+                            <td><strong>{{ paciente.codigo_universitario }}</strong></td>
+                            <td>{{ paciente.facultad_escuela }}</td>
+                            <td>{{ paciente.persona?.tipo_documento }}: {{ paciente.persona?.numero_documento }}</td>
+                            <td>{{ paciente.persona?.celular || '-' }}</td>
+                            <td>
+                                <button @click="irAHistoriaClinica(paciente.idpaciente)" class="btn-secondary"
                                 style="padding: 6px 14px; font-size: 12px; border-radius: 6px; margin-right: 8px; background: #ccfbf1; color: #0f766e">
-                                    <i class="icono-historia"></i> Ver Historia Clínica
+                                    <i class="icono-historia"></i> Historia Clínica
                                 </button>
                                 <button @click="openEditForm(paciente)" class="btn-secondary"
                                     style="padding: 6px 14px; font-size: 12px; border-radius: 6px; margin-right: 8px;">
                                     Editar
                                 </button>
-                                <button @click="handleDeletePaciente(paciente.Persona?.idPersona)" class="btn-secondary"
+                                <button @click="handleDeletePaciente(paciente.persona?.idpersona)" class="btn-secondary"
                                     style="padding: 6px 14px; font-size: 12px; border-radius: 6px; background: #fee2e2; color: #ef4444;">
                                     Eliminar
                                 </button>
                             </td>
                         </tr>
                         <tr v-if="filteredPacientes.length === 0">
-                            <td colspan="5" class="empty-row">No se encontraron pacientes registrados.</td>
+                            <td colspan="6" class="empty-row">No se encontraron pacientes registrados.</td>
                         </tr>
                     </tbody>
                 </table>

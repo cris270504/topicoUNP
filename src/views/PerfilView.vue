@@ -36,9 +36,9 @@ const fetchPerfilUsuario = async () => {
 
     // 2. Traer los datos sincronizados desde la tabla madre Persona
     const { data: persona, error: errPersona } = await supabase
-      .from('Persona')
+      .from('persona')
       .select('nombres, apellidos, tipo_documento, numero_documento, celular')
-      .eq('idPersona', user.id)
+      .eq('idpersona', user.id)
       .single()
 
     if (errPersona) throw errPersona
@@ -84,18 +84,18 @@ const handleUpdateDatos = async () => {
 
     // 1. Actualizar datos comunes en la tabla Persona
     const { error: errPersona } = await supabase
-      .from('Persona')
+      .from('persona')
       .update({ celular: celular.value.trim() || null })
-      .eq('idPersona', user.id)
+      .eq('idpersona', user.id)
 
     if (errPersona) throw errPersona
 
     // 2. Si es Paciente, actualizar también su dirección residencial
     if (userRole.value.toLowerCase() === 'paciente') {
       const { error: errPaciente } = await supabase
-        .from('Paciente')
+        .from('paciente')
         .update({ direccion: direccion.value.trim() || null })
-        .eq('idPaciente', user.id)
+        .eq('idpaciente', user.id)
       
       if (errPaciente) throw errPaciente
     }

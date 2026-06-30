@@ -157,7 +157,7 @@ const handleCreateUser = async () => {
       if (errSecretaria) throw errSecretaria
     }
 
-    showAlert('¡Trabajador dado de alta exitosamente en MovyBalance!', 'success')
+    showAlert('¡Trabajador dado de alta exitosamente en Tópico UNP!', 'success')
     showModal.value = false
     resetForm()
     await fetchPersonal()
@@ -291,7 +291,7 @@ onMounted(() => {
 
               <div class="input-group span-2">
                 <label for="modal-email">Correo Electrónico Institucional *</label>
-                <input id="modal-email" type="email" v-model="email" placeholder="usuario@movybalance.com" required />
+                <input id="modal-email" type="email" v-model="email" placeholder="usuario@topico.com" required />
               </div>
 
               <div class="input-group span-2">

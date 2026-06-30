@@ -2,7 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '../lib/supabaseClient'
-import logoImg from '@/components/icons/MovyBalanceLoguito.png'
+import logoImg from '@/components/icons/logo-UNP.png'
 
 const props = defineProps({
   collapsed: {
@@ -43,11 +43,6 @@ const navItems = [
     label: 'Citas / Agenda',
     icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z',
     name: 'citas'
-  },
-    {
-    label: 'Tarifario',
-    icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
-    name: 'tarifario'
   },
   {
     label: 'Mi Horario',
@@ -98,9 +93,9 @@ onMounted(() => {
   <aside class="sidebar" :class="{ collapsed }">
 
     <div class="sidebar-logo">
-      <img :src="logoImg" alt="MovyBalance" class="logo-img" />
+      <img :src="logoImg" alt="logo-UNP" class="logo-img" />
       <Transition name="fade-label">
-        <span v-if="!collapsed" class="logo-label">MovyBalance</span>
+        <span v-if="!collapsed" class="logo-label">Tópico UNP</span>
       </Transition>
     </div>
 

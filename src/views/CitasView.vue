@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { useCitas, ESTADOS_SESION } from '@/composables/useCitas'
+import { useCitas, ESTADOS_CITA } from '@/composables/useCitas'
 import { useAlert } from '@/composables/useAlert'
 import { supabase } from '@/lib/supabaseClient'
 import { getTodayISO, getDateISO } from '@/lib/dateUtils'
@@ -376,7 +376,7 @@ const getColorTratamiento = (idTratamiento) => {
           <label>Estado</label>
           <select v-model="filtroEstado" @change="cargarCitas">
             <option value="">Todos</option>
-            <option v-for="(info, key) in ESTADOS_SESION" :key="key" :value="key">{{ info.label }}</option>
+            <option v-for="(info, key) in ESTADOS_CITA" :key="key" :value="key">{{ info.label }}</option>
           </select>
         </div>
         <div v-if="puedeGestionar" class="input-group">

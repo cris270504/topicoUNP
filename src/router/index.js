@@ -28,50 +28,46 @@ const router = createRouter({
           path: 'pacientes',
           name: 'pacientes',
           component: () => import('@/views/PacientesView.vue'),
-          meta: { roles: ['secretaria', 'admin'] } // Roles que pueden ver pacientes
+          // Se agregó 'personal_salud' para que el médico pueda buscar estudiantes
+          meta: { roles: ['secretaria', 'admin', 'personal_salud'] } 
         },
         {
           path: 'citas',
           name: 'citas',
           component: () => import('@/views/CitasView.vue'),
-          meta: { roles: ['secretaria', 'fisioterapeuta', 'admin', 'paciente'] }
+          // Actualizado al nuevo esquema de roles
+          meta: { roles: ['secretaria', 'personal_salud', 'admin', 'paciente'] }
         },
         {
           path: 'configuracion',
           name: 'configuracion',
           component: () => import('@/views/ConfiguracionView.vue'),
-          meta: { roles: ['admin'] } // 👈 CLAVE 1: Solo el Administrador puede acceder a esta ruta
-        },
-        {
-          path: 'tarifario',
-          name: 'tarifario',
-          component: () => import('@/components/GestorTarifario.vue'), // O '@/views/GestorTarifario.vue' si lo guardaste ahí
-          meta: { roles: ['admin'] } // Bloqueo estricto: Solo tú
+          meta: { roles: ['admin'] } 
         },
         {
           path: 'mi-perfil',
           name: 'miperfil',
           component: () => import('@/views/PerfilView.vue'),
-          meta: { roles: ['secretaria', 'fisioterapeuta', 'admin', 'paciente'] }
+          meta: { roles: ['secretaria', 'personal_salud', 'admin', 'paciente'] }
         },
         {
           path: 'horarios',
           name: 'horarios',
           component: () => import('@/views/HorariosView.vue'),
-          meta: { roles: ['fisioterapeuta'] } // Solo equipo clínico / gestión
+          meta: { roles: ['personal_salud', 'admin'] } 
         },
         {
-          path: 'atencion/:idSesion',
+          path: 'atencion/:idCita', // 👈 Parámetro actualizado de idSesion a idCita
           name: 'atencion',
           component: () => import('@/views/AtencionView.vue'),
-          meta: { roles: ['fisioterapeuta', 'admin'] } // Solo equipo clínico y admin
+          meta: { roles: ['personal_salud', 'admin'] } 
         },
         {
           path: '/paciente/:idPaciente/historia-clinica',
           name: 'HistoriaClinica',
           component: () => import('@/views/HistoriaClinicaView.vue'),
           props: true,
-          meta: { roles: ['fisioterapeuta', 'admin'] }
+          meta: { roles: ['personal_salud', 'admin'] }
         }
       ]
     },
@@ -100,7 +96,8 @@ router.beforeEach(async (to) => {
   const rolesPermitidos = to.matched.find(record => record.meta.roles)?.meta.roles
 
   if (user && rolesPermitidos) {
-    const userRol = user.user_metadata?.rol
+    // 👈 Asegúrate de que este 'rol' coincida con los nuevos nombres
+    const userRol = user.user_metadata?.rol 
 
     if (userRol === 'admin') {
       return // Admin pasa libre

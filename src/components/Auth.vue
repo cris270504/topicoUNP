@@ -3,7 +3,7 @@ import { useRouter } from 'vue-router'
 import { ref } from 'vue'
 import { supabase } from '../lib/supabaseClient'
 import { useAlert } from '@/composables/useAlert'
-import logoImg from '@/components/icons/MovyBalance.png'
+import logoImg from '@/components/icons/logo-UNP.png'
 
 const router = useRouter()
 const { showAlert } = useAlert()
@@ -26,7 +26,7 @@ const handleSubmit = async () => {
             })
             if (error) throw error
             router.push({ name: 'dashboard' })
-            showAlert('¡Bienvenido de vuelta a MovyBalance!', 'success')
+            showAlert('¡Bienvenido de vuelta al sistema de tópico UNP!', 'success')
         } else {
             const { data, error } = await supabase.auth.signUp({
                 email: email.value,
@@ -67,7 +67,7 @@ const toggleMode = () => {
 
             <!-- Logo real -->
             <div class="card-header">
-                <img :src="logoImg" alt="MovyBalance" class="logo-img" />
+                <img :src="logoImg" alt="logo-UNP" class="logo-img" />
             </div>
 
             <!-- Título -->

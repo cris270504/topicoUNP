@@ -1,55 +1,38 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+// 1. Definimos los encabezados CORS permitidos
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': '*', // En producción puedes cambiar '*' por tu dominio real
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
 serve(async (req) => {
+  // 2. ATENCIÓN AQUÍ: Interceptar la petición OPTIONS (Preflight del navegador)
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
+    // Extraemos el payload que envías desde Vue
+    const body = await req.json()
+    const { email, password, nombres, apellidos, rol, tipo_documento, numero_documento, celular, fecha_nacimiento } = body
+
+    // Inicializamos el cliente de Supabase con el SERVICE_ROLE_KEY para tener permisos de Admin
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    const { email, password, nombres, apellidos, rol, tipo_documento, numero_documento, celular, fecha_nacimiento } = await req.json()
-
-    if (!email || !password) {
-      throw new Error("El correo y la contraseña son obligatorios.")
-    }
-
-// 🛡️ PRE-VALIDACIÓN (DNI)
-    if (numero_documento) {
-      const { data: personaDni } = await supabaseAdmin
-        .from('Persona')
-        .select('numero_documento')
-        .eq('numero_documento', numero_documento)
-        .maybeSingle()
-        
-      if (personaDni) {
-        // ✅ AHORA DEVOLVEMOS 200 PARA QUE VUE PUEDA LEER EL MENSAJE
-        return new Response(
-          JSON.stringify({ error: `El documento ${numero_documento} ya pertenece a otro paciente registrado.` }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
-        )
-      }
-    }
-
-    const safePassword = String(password);
-
-    const { data: userAuth, error: authError } = await supabaseAdmin.auth.admin.createUser({
+    // Creamos el usuario en auth.users
+    const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email: email,
-      password: safePassword,
+      password: password,
       email_confirm: true,
       user_metadata: {
         nombres,
         apellidos,
-        rol: rol || 'paciente',
+        rol,
         tipo_documento,
         numero_documento,
         celular,
@@ -57,31 +40,25 @@ serve(async (req) => {
       }
     })
 
-    if (authError) {
-      // Si el error es por correo duplicado en Auth, lo traducimos
-      if (authError.message.includes('already registered')) {
-        throw new Error(`El correo ${email} ya está en uso por otra cuenta.`)
-      }
-      throw authError
-    }
+    if (error) throw error
 
+    // 3. Devolvemos el éxito adjuntando los encabezados CORS
     return new Response(
-      JSON.stringify({ user_id: userAuth.user.id }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      JSON.stringify({ user_id: data.user.id, message: 'Usuario creado exitosamente' }),
+      { 
+        status: 200, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      }
     )
 
   } catch (error) {
-    const mensajeReal = error instanceof Error ? error.message : String(error);
-    
-    // Si el error es por correo duplicado en Auth, lo traducimos al vuelo
-    const textoFinal = mensajeReal.includes('already registered') 
-      ? 'El correo proporcionado ya está en uso por otra cuenta.'
-      : mensajeReal;
-
-    // ✅ TAMBIÉN DEVOLVEMOS 200 AQUÍ PARA LOS ERRORES DE AUTH
+    // 4. Si hay error, TAMBIÉN debemos devolver los encabezados CORS, o Vue no podrá leer el mensaje
     return new Response(
-      JSON.stringify({ error: textoFinal }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      JSON.stringify({ error: error.message }),
+      { 
+        status: 400, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      }
     )
   }
 })

@@ -29,7 +29,7 @@ const pageTitle = computed(() => {
     expedientes: 'Expedientes Clínicos',
     configuracion: 'Configuración del Sistema'
   }
-  return map[route.name] ?? 'MovyBalance'
+  return map[route.name] ?? 'Tópico UNP'
 })
 
 const logout = async () => {
