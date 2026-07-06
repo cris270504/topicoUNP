@@ -3,6 +3,30 @@ import { supabase } from '@/lib/supabaseClient'
 import { useAlert } from '@/composables/useAlert'
 
 // ─── Constantes de negocio (Adaptadas al Tópico) ──────────────
+export const MODALIDADES = [
+    {
+        id: 'evaluacion_inicial',
+        label: 'Evaluación Inicial',
+        descripcion: 'Primera consulta y diagnóstico fisioterapéutico',
+        icono: '🩺',
+        color: '#0f766e'
+    },
+    {
+        id: 'tratamiento',
+        label: 'Tratamiento',
+        descripcion: 'Ciclo de sesiones terapéuticas',
+        icono: '🔗',
+        color: '#2563eb'
+    },
+    {
+        id: 'masaje',
+        label: 'Masaje',
+        descripcion: 'Sesión de masaje terapéutico',
+        icono: '💆',
+        color: '#7c3aed'
+    }
+]
+
 export const ESTADOS_CITA = {
     pendiente: { label: 'Pendiente', color: '#f59e0b', bg: '#fef3c7' },
     confirmada: { label: 'Confirmada', color: '#10b981', bg: '#d1fae5' },
@@ -31,7 +55,7 @@ export function useCitas() {
     const loadingAccion = ref(false)
 
     // ── Computed de rol ─────────────────────────────────────────
-    const esPersonalSalud = computed(() => userRole.value === 'personal_salud')
+    const esPersonalSalud = computed(() => userRole.value === 'fisioterapeuta')
     const esSecretaria = computed(() => userRole.value === 'secretaria')
     const esPaciente = computed(() => userRole.value === 'paciente')
     const esAdmin = computed(() => userRole.value === 'admin')
@@ -41,7 +65,8 @@ export function useCitas() {
     const initUser = async () => {
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
-            userRole.value = user.user_metadata?.rol || 'paciente'
+            const rawRol = user.user_metadata?.rol || 'paciente'
+            userRole.value = rawRol === 'personal_salud' ? 'fisioterapeuta' : rawRol
             userId.value = user.id
         } else {
             clearUser() // Limpia la memoria si no hay sesión
@@ -65,39 +90,50 @@ export function useCitas() {
 
         loading.value = true
         try {
-            // Consulta relacional directa a las nuevas tablas
-            let query = supabase.from('Cita')
+            let query = supabase.from('cita')
                 .select(`
-                    idCita, fecha_hora, motivo_consulta, estado, paciente_en_sala, created_at,
-                    Servicio_Topico ( idServicio, nombre_servicio, duracion_estimada_minutos ),
-                    Paciente ( idPaciente, codigo_universitario, tipo_usuario, Persona ( nombres, apellidos, celular ) ),
-                    Personal_Salud ( idPersonalSalud, especialidad, Persona ( nombres, apellidos ) )
+                    idcita, fecha_hora, motivo_consulta, estado, paciente_en_sala, created_at,
+                    servicio_topico ( idservicio, nombre_servicio, duracion_estimada_minutos ),
+                    paciente ( idpaciente, codigo_universitario, tipo_usuario, persona ( nombres, apellidos, celular ) ),
+                    personal_salud ( idpersonalsalud, especialidad, persona ( nombres, apellidos ) )
                 `)
 
             // Filtros de seguridad por rol
             if (esPaciente.value && userId.value) {
-                query = query.eq('idPaciente', userId.value)
+                query = query.eq('idpaciente', userId.value)
             } else if (esPersonalSalud.value && userId.value) {
-                query = query.eq('idPersonalSalud', userId.value)
+                query = query.eq('idpersonalsalud', userId.value)
             }
 
             // Filtros de búsqueda
             if (filtros.rangoInicio && filtros.rangoFin) {
                 query = query.gte('fecha_hora', filtros.rangoInicio).lte('fecha_hora', filtros.rangoFin)
             } else if (filtros.fecha) {
-                // Rango horario Perú
                 const inicio = `${filtros.fecha}T00:00:00-05:00`
                 const fin = `${filtros.fecha}T23:59:59-05:00`
                 query = query.gte('fecha_hora', inicio).lte('fecha_hora', fin)
             }
 
             if (filtros.estado) query = query.eq('estado', filtros.estado)
-            if (filtros.idPersonalSalud) query = query.eq('idPersonalSalud', filtros.idPersonalSalud)
+            if (filtros.idPersonalSalud) query = query.eq('idpersonalsalud', filtros.idPersonalSalud)
 
             const { data, error } = await query.order('fecha_hora', { ascending: true })
             if (error) throw error
 
-            citas.value = data ?? []
+            // Normalizar a campos planos para compatibilidad con CitasView
+            citas.value = (data ?? []).map(c => ({
+                ...c,
+                idCita: c.idcita,
+                idSesion: c.idcita,
+                idFisioterapeuta: c.idpersonalsalud,
+                idPaciente: c.paciente?.idpaciente,
+                paciente_nombres: c.paciente?.persona?.nombres ?? '',
+                paciente_apellidos: c.paciente?.persona?.apellidos ?? '',
+                paciente_celular: c.paciente?.persona?.celular ?? '',
+                fisio_nombres: c.personal_salud?.persona?.nombres ?? '',
+                fisio_apellidos: c.personal_salud?.persona?.apellidos ?? '',
+                fisio_especialidad: c.personal_salud?.especialidad ?? '',
+            }))
         } catch (err) {
             showAlert('Error al cargar citas: ' + err.message, 'error')
         } finally {
@@ -108,35 +144,43 @@ export function useCitas() {
     // ── fetchPersonalSalud ──────────────────────────────────────
     const fetchPersonalSalud = async () => {
         const { data, error } = await supabase
-            .from('Personal_Salud')
+            .from('personal_salud')
             .select(`
-                idPersonalSalud, tipo_personal, especialidad, activo,
-                Persona ( nombres, apellidos )
+                idpersonalsalud, tipo_personal, especialidad, activo,
+                persona ( nombres, apellidos )
             `)
             .eq('activo', true)
 
         if (error) { showAlert('Error al cargar personal: ' + error.message, 'error'); return }
-        personalSalud.value = data ?? []
+        personalSalud.value = (data ?? []).map(p => ({
+            ...p,
+            idPersonalSalud: p.idpersonalsalud,
+            Persona: p.persona,
+        }))
     }
 
     // ── fetchPacientes ──────────────────────────────────────────
     const fetchPacientes = async () => {
         const { data, error } = await supabase
-            .from('Paciente')
+            .from('paciente')
             .select(`
-                idPaciente, codigo_universitario, facultad_escuela, tipo_usuario,
-                Persona ( nombres, apellidos, celular, numero_documento )
+                idpaciente, codigo_universitario, facultad_escuela, tipo_usuario,
+                persona ( nombres, apellidos, celular, numero_documento )
             `)
 
         if (error) { showAlert('Error al cargar pacientes: ' + error.message, 'error'); return }
-        pacientes.value = data ?? []
+        pacientes.value = (data ?? []).map(p => ({
+            ...p,
+            idPaciente: p.idpaciente,
+            Persona: p.persona,
+        }))
     }
 
     // ── fetchServicios ──────────────────────────────────────────
     const fetchServicios = async () => {
         const { data, error } = await supabase
-            .from('Servicio_Topico')
-            .select('idServicio, nombre_servicio, descripcion, duracion_estimada_minutos')
+            .from('servicio_topico')
+            .select('idservicio, nombre_servicio, descripcion, duracion_estimada_minutos')
             .eq('activo', true)
 
         if (!error) servicios.value = data ?? []
@@ -162,11 +206,11 @@ export function useCitas() {
         loadingAccion.value = true
         try {
             const { data, error } = await supabase
-                .from('Cita')
+                .from('cita')
                 .insert({
-                    idPaciente,
-                    idPersonalSalud: idPersonalSalud || null,
-                    idServicio,
+                    idpaciente: idPaciente,
+                    idpersonalsalud: idPersonalSalud || null,
+                    idservicio: idServicio,
                     fecha_hora,
                     motivo_consulta,
                     estado: 'pendiente'
@@ -200,13 +244,13 @@ export function useCitas() {
         try {
             // Actualización directa, el trigger Historial_Estado_Cita registrará el cambio
             const { error } = await supabase
-                .from('Cita')
+                .from('cita')
                 .update({
                     fecha_hora: nuevaFechaHora,
-                    idPersonalSalud: idPersonalSaludNuevo || null,
+                    idpersonalsalud: idPersonalSaludNuevo || null,
                     motivo_consulta: motivo
                 })
-                .eq('idCita', idCita)
+                .eq('idcita', idCita)
 
             if (error) throw error
             showAlert('✅ Cita reprogramada.', 'success')
@@ -242,9 +286,9 @@ export function useCitas() {
         loadingAccion.value = true
         try {
             const { error } = await supabase
-                .from('Cita')
+                .from('cita')
                 .update({ estado: nuevoEstado, ...extraCampos })
-                .eq('idCita', idCita)
+                .eq('idcita', idCita)
 
             if (error) throw error
             showAlert(`✅ Estado actualizado a: ${ESTADOS_CITA[nuevoEstado].label}`, 'success')
@@ -272,9 +316,9 @@ export function useCitas() {
         const finBusqueda = `${fechaFin.getFullYear()}-${String(fechaFin.getMonth() + 1).padStart(2, '0')}-${String(fechaFin.getDate()).padStart(2, '0')} ${String(fechaFin.getHours()).padStart(2, '0')}:${String(fechaFin.getMinutes()).padStart(2, '0')}:59`
 
         const { data, error } = await supabase
-            .from('Cita')
-            .select('idCita')
-            .eq('idPersonalSalud', idPersonalSalud)
+            .from('cita')
+            .select('idcita')
+            .eq('idpersonalsalud', idPersonalSalud)
             .not('estado', 'in', '("cancelada","ausente","completada")')
             .gte('fecha_hora', inicioBusqueda)
             .lt('fecha_hora', finBusqueda)
@@ -302,12 +346,14 @@ export function useCitas() {
     }
 
     return {
-        citas, personalSalud, pacientes, horarios, servicios,
+        citas, personalSalud, fisios: personalSalud, pacientes, horarios, servicios,
         loading, loadingAccion, userRole, userId,
 
-        esPersonalSalud, esSecretaria, esPaciente, esAdmin, puedeGestionar,
+        esPersonalSalud, esFisioterapeuta: esPersonalSalud,
+        esSecretaria, esPaciente, esAdmin, puedeGestionar,
 
-        initUser, fetchCitas, fetchPersonalSalud, fetchPacientes, fetchServicios,
+        initUser, fetchCitas, fetchPersonalSalud, fetchFisios: fetchPersonalSalud,
+        fetchPacientes, fetchServicios,
         crearCita, reprogramarCita,
         registrarCheckIn, confirmarAsistencia, marcarInasistencia, cancelarCita,
 

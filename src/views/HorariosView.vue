@@ -29,9 +29,9 @@ const fetchHorarios = async () => {
     userId.value = user.id
 
     const { data, error } = await supabase
-      .from('Horario')
+      .from('horario')
       .select('*')
-      .eq('idFisioterapeuta', userId.value)
+      .eq('idpersonalsalud', userId.value)
       .order('dia_semana', { ascending: true })
       .order('hora_inicio', { ascending: true })
 
@@ -82,23 +82,23 @@ const guardarHorarios = async () => {
   try {
     // 2. Eliminamos los registros anteriores del fisioterapeuta
     const { error: errDel } = await supabase
-      .from('Horario')
+      .from('horario')
       .delete()
-      .eq('idFisioterapeuta', userId.value)
+      .eq('idpersonalsalud', userId.value)
 
     if (errDel) throw errDel
 
     // 3. Insertamos el nuevo bloque de horarios completo
     if (horarios.value.length > 0) {
       const inserts = horarios.value.map(h => ({
-        idFisioterapeuta: userId.value,
+        idpersonalsalud: userId.value,
         dia_semana: h.dia_semana,
         hora_inicio: h.hora_inicio,
         hora_fin: h.hora_fin
       }))
 
       const { error: errIns } = await supabase
-        .from('Horario')
+        .from('horario')
         .insert(inserts)
 
       if (errIns) throw errIns

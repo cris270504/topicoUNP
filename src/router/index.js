@@ -28,15 +28,13 @@ const router = createRouter({
           path: 'pacientes',
           name: 'pacientes',
           component: () => import('@/views/PacientesView.vue'),
-          // Se agregó 'personal_salud' para que el médico pueda buscar estudiantes
-          meta: { roles: ['secretaria', 'admin', 'personal_salud'] } 
+          meta: { roles: ['secretaria', 'admin', 'fisioterapeuta'] }
         },
         {
           path: 'citas',
           name: 'citas',
           component: () => import('@/views/CitasView.vue'),
-          // Actualizado al nuevo esquema de roles
-          meta: { roles: ['secretaria', 'personal_salud', 'admin', 'paciente'] }
+          meta: { roles: ['secretaria', 'fisioterapeuta', 'admin', 'paciente'] }
         },
         {
           path: 'configuracion',
@@ -48,26 +46,32 @@ const router = createRouter({
           path: 'mi-perfil',
           name: 'miperfil',
           component: () => import('@/views/PerfilView.vue'),
-          meta: { roles: ['secretaria', 'personal_salud', 'admin', 'paciente'] }
+          meta: { roles: ['secretaria', 'fisioterapeuta', 'admin', 'paciente'] }
+        },
+        {
+          path: 'expedientes',
+          name: 'expedientes',
+          component: () => import('@/views/ExpedientesView.vue'),
+          meta: { roles: ['fisioterapeuta'] }
         },
         {
           path: 'horarios',
           name: 'horarios',
           component: () => import('@/views/HorariosView.vue'),
-          meta: { roles: ['personal_salud', 'admin'] } 
+          meta: { roles: ['fisioterapeuta', 'admin'] }
         },
         {
           path: 'atencion/:idCita', // 👈 Parámetro actualizado de idSesion a idCita
           name: 'atencion',
           component: () => import('@/views/AtencionView.vue'),
-          meta: { roles: ['personal_salud', 'admin'] } 
+          meta: { roles: ['fisioterapeuta', 'admin'] } 
         },
         {
           path: '/paciente/:idPaciente/historia-clinica',
           name: 'HistoriaClinica',
           component: () => import('@/views/HistoriaClinicaView.vue'),
           props: true,
-          meta: { roles: ['personal_salud', 'admin'] }
+          meta: { roles: ['fisioterapeuta', 'admin'] }
         }
       ]
     },
@@ -96,8 +100,8 @@ router.beforeEach(async (to) => {
   const rolesPermitidos = to.matched.find(record => record.meta.roles)?.meta.roles
 
   if (user && rolesPermitidos) {
-    // 👈 Asegúrate de que este 'rol' coincida con los nuevos nombres
-    const userRol = user.user_metadata?.rol 
+    const rawRol = user.user_metadata?.rol
+    const userRol = rawRol === 'personal_salud' ? 'fisioterapeuta' : rawRol
 
     if (userRol === 'admin') {
       return // Admin pasa libre
