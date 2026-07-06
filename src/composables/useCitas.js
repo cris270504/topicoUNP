@@ -290,11 +290,10 @@ export function useCitas() {
 
     if (!idpaciente)       { showAlert('Debe seleccionar un paciente.', 'error');       return false }
     if (!idfisioterapeuta) { showAlert('Debe seleccionar un fisioterapeuta.', 'error'); return false }
-    if (!idservicio)       { showAlert('Debe seleccionar un servicio.', 'error');        return false }
     if (!fecha_hora)       { showAlert('Debe seleccionar fecha y hora.', 'error');       return false }
 
     // Verificar disponibilidad antes de insertar
-    const duracion = servicios.value.find(s => s.idservicio === idservicio)?.duracion_estimada_minutos ?? 20
+    const duracion = 30
     const ocupado = await verificarDisponibilidad(idfisioterapeuta, fecha_hora, duracion)
     if (ocupado) {
       showAlert('Ese horario ya está ocupado para el fisioterapeuta seleccionado.', 'error')
@@ -308,7 +307,6 @@ export function useCitas() {
         .insert({
           idpaciente,
           idfisioterapeuta,
-          idservicio,
           fecha_hora,
           motivo_consulta: motivo_consulta?.trim() || null,
           estado: 'pendiente',

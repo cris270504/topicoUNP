@@ -162,6 +162,13 @@ const limpiarPaciente = () => {
   resultadosBusqueda.value = []
 }
 
+// Auto-selecciona el primer servicio cuando se cargue la lista
+watch(() => props.servicios, (lista) => {
+  if (lista?.length && !idServicio.value) {
+    idServicio.value = lista[0].idservicio
+  }
+}, { immediate: true })
+
 // ── Reseteo del formulario ───────────────────────────────────────────────────
 watch(() => props.isOpen, (abierto) => {
   if (abierto) resetForm()
@@ -173,7 +180,7 @@ const resetForm = () => {
   resultadosBusqueda.value = []
   pacienteSeleccionado.value = null
   idFisioterapeuta.value = null
-  idServicio.value = null
+  idServicio.value = props.servicios?.[0]?.idservicio ?? null
   fecha.value = ''
   hora.value = ''
   motivoConsulta.value = ''
@@ -228,7 +235,6 @@ const esDomingo = computed(() => {
 const formularioValido = computed(() =>
   !!pacienteSeleccionado.value &&
   !!idFisioterapeuta.value &&
-  !!idServicio.value &&
   !!fecha.value &&
   !!hora.value &&
   !esDomingo.value
@@ -355,17 +361,6 @@ watch(() => props.tratamientoARecargar, (t) => {
             <div class="form-grid">
 
               <div class="input-group">
-                <label>Servicio <span class="req">*</span></label>
-                <select v-model="idServicio" required>
-                  <option :value="null" disabled>— Seleccionar servicio —</option>
-                  <option v-for="s in servicios" :key="s.idservicio" :value="s.idservicio">
-                    {{ s.nombre_servicio }}
-                    ({{ s.duracion_estimada_minutos }} min)
-                  </option>
-                </select>
-              </div>
-
-              <div class="input-group">
                 <label>Fisioterapeuta <span class="req">*</span></label>
                 <select v-model="idFisioterapeuta" required>
                   <option :value="null" disabled>— Seleccionar especialista —</option>
@@ -395,16 +390,15 @@ watch(() => props.tratamientoARecargar, (t) => {
               <div class="input-group">
                 <label>Horario disponible <span class="req">*</span></label>
                 <select v-model="hora" required
-                  :disabled="!fecha || !idFisioterapeuta || !idServicio || loadingSlots || esDomingo">
+                  :disabled="!fecha || !idFisioterapeuta || loadingSlots || esDomingo">
                   <option value="" disabled>
                     {{
                       loadingSlots ? 'Buscando turnos libres...' :
                         esDomingo ? '❌ Día no disponible' :
                           !idFisioterapeuta ? '⚠️ Selecciona un especialista primero' :
-                            !idServicio ? '⚠️ Selecciona un servicio primero' :
-                              !fecha ? '⚠️ Selecciona una fecha primero' :
-                                slotsFiltrados.length === 0 ? '❌ Sin turnos disponibles ese día' :
-                                  '— Seleccionar hora —'
+                            !fecha ? '⚠️ Selecciona una fecha primero' :
+                              slotsFiltrados.length === 0 ? '❌ Sin turnos disponibles ese día' :
+                                '— Seleccionar hora —'
                     }}
                   </option>
                   <option v-for="slot in slotsFiltrados" :key="slot" :value="slot">
