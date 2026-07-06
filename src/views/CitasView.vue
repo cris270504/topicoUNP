@@ -12,11 +12,12 @@ const router = useRouter()
 
 
 const {
-  citas, fisios, pacientes, loading, loadingAccion,
+  citas, fisios, loading, loadingAccion,
   esFisioterapeuta, esPaciente, puedeGestionar,
-  initUser, fetchCitas, fetchFisios, fetchPacientes, onBuscarPorCodigo, onBuscarPorDNI, obtenerSlots,
-  crearCita, registrarCheckIn, cancelarCita, marcarInasistencia,
-  confirmarAsistencia, formatFechaHora, getEstadoInfo, nombreCompleto, reprogramarCita
+  initUser, fetchCitas, fetchFisios,
+  buscarPacientePorCodigo, buscarPacientePorDNI,
+  crearCita, registrarCheckIn, cancelarCita, marcarAusente,
+  confirmarCita, formatFechaHora, getEstadoInfo, nombreCompleto,
 } = useCitas()
 
 // Stubs para funciones pendientes de implementación
@@ -119,6 +120,7 @@ onMounted(async () => {
 
   await Promise.all([
     fetchServicios(),
+    fetchFisios(),
     cargarCitas()
   ])
 })
@@ -133,7 +135,7 @@ const cargarCitas = async () => {
     if (filtroFecha.value) filtros.fecha = filtroFecha.value
   }
   if (filtroEstado.value) filtros.estado = filtroEstado.value
-  if (filtroFisio.value) filtros.idFisioterapeuta = filtroFisio.value
+  if (filtroFisio.value) filtros.idfisioterapeuta = filtroFisio.value
   await fetchCitas(filtros)
 }
 
@@ -177,12 +179,12 @@ const handleReprogramar = async (payload) => {
 
 const handleConfirmarCancelacion = async () => {
   if (!motivoCancelacion.value.trim()) return showAlert('Debe indicar el motivo.', 'error')
-  if (await cancelarCita(sesionSeleccionada.value.idCita, motivoCancelacion.value.trim())) {
+  if (await cancelarCita({ idcita: sesionSeleccionada.value.idcita, motivo: motivoCancelacion.value.trim() })) {
     showModalCancelacion.value = false; await cargarCitas()
   }
 }
 const handleInasistencia = async (sesion) => {
-  if (await showConfirm(`¿Marcar inasistencia de ${sesion.paciente_nombres} ${sesion.paciente_apellidos}?`) && await marcarInasistencia(sesion.idCita)) await cargarCitas()
+  if (await showConfirm(`¿Marcar inasistencia de ${sesion.paciente_nombres} ${sesion.paciente_apellidos}?`) && await marcarAusente(sesion.idcita)) await cargarCitas()
 }
 const abrirModalNueva = async () => {
   showModalNueva.value = true
@@ -204,7 +206,7 @@ const handleAtender = (sesion) => {
 const handleConfirmarAsistencia = async (sesion) => {
   const confirmado = await showConfirm(`¿El paciente ${sesion.paciente_nombres} ${sesion.paciente_apellidos} ha confirmado su asistencia telefónicamente?`)
   if (!confirmado) return
-  if (await confirmarAsistencia(sesion.idCita)) {
+  if (await confirmarCita(sesion.idcita)) {
     await cargarCitas()
     showModalDetalle.value = false
   }
@@ -334,8 +336,8 @@ const obtenerSituacionCita = (sesion) => {
           <label>Fisioterapeuta</label>
           <select v-model="filtroFisio" @change="cargarCitas">
             <option value="">Todos</option>
-            <option v-for="f in fisios" :key="f.idFisioterapeuta" :value="f.idFisioterapeuta">{{ f.Persona?.nombres }}
-              {{ f.Persona?.apellidos }}</option>
+            <option v-for="f in fisios" :key="f.idfisioterapeuta" :value="f.idfisioterapeuta">{{ f.persona?.nombres }}
+              {{ f.persona?.apellidos }}</option>
           </select>
         </div>
       </div>
@@ -515,7 +517,7 @@ const obtenerSituacionCita = (sesion) => {
     </Transition>
 
     <ModalNuevaCita :isOpen="showModalNueva" :fisios="fisios" :servicios="servicios" :loadingAccion="loadingAccion"
-      :obtenerSlots="obtenerSlots" :onBuscarPorCodigo="onBuscarPorCodigo" :onBuscarPorDNI="onBuscarPorDNI"
+      :obtenerSlots="obtenerSlotsDisponibles" :onBuscarPorCodigo="buscarPacientePorCodigo" :onBuscarPorDNI="buscarPacientePorDNI"
       @close="showModalNueva = false" @submit="handleNuevaCita" />
     <ModalReprogramarCita :isOpen="showModalReprogramar" :sesion="sesionSeleccionada" :fisios="fisios"
       :loadingAccion="loadingAccion" @close="showModalReprogramar = false" @submit="handleReprogramar" />
