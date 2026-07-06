@@ -546,9 +546,7 @@ const nombrePaciente = (p) => `${p.Persona?.nombres ?? ''} ${p.Persona?.apellido
                 <label>Horario disponible <span class="req">*</span></label>
                 <select v-model="hora" required :disabled="!fecha || !idFisioterapeuta || loadingSlots">
                   <option value="" disabled>
-                    {{ loadingSlots ? 'Buscando huecos libres...' : (!idFisioterapeuta ? '⚠️ Falta Especialista'
-                      : (!fecha ? '⚠️ Falta Fecha' : (slotsFiltrados.length === 0 ? '❌ No hay turnos ese día' : '—
-                    Seleccione hora —'))) }}
+                    {{ loadingSlots ? 'Buscando huecos libres...' : (!idFisioterapeuta ? '⚠️ Falta Especialista' : (!fecha ? '⚠️ Falta Fecha' : (slotsFiltrados.length === 0 ? '❌ No hay turnos ese día' : '— Seleccione hora —'))) }}
                   </option>
                   <option v-for="slot in slotsFiltrados" :key="slot" :value="slot">{{ slot }}</option>
                 </select>
@@ -594,8 +592,7 @@ const nombrePaciente = (p) => `${p.Persona?.nombres ?? ''} ${p.Persona?.apellido
                   <label>Hora</label>
                   <select v-model="sesionExtra.hora" required :disabled="!sesionExtra.fecha || sesionExtra.loading">
                     <option value="" disabled>
-                      {{ sesionExtra.loading ? 'Buscando...' : (sesionExtra.slots?.length ? '— Seleccionar —' : 'Sin
-                      turnos') }}
+                      {{ sesionExtra.loading ? 'Buscando...' : (sesionExtra.slots?.length ? '— Seleccionar —' : 'Sin turnos') }}
                     </option>
                     <option v-for="slot in sesionExtra.slots" :key="slot" :value="slot">{{ slot }}</option>
                   </select>
