@@ -16,15 +16,13 @@ const emit = defineEmits(['toggle'])
 const route = useRoute()
 const router = useRouter()
 
-// Estado reactivo para almacenar el rol del usuario
 const userRole = ref(null)
 
-// Recuperar el rol desde los user_metadata del JWT
 const fetchUserRole = async () => {
   const { data: { user } } = await supabase.auth.getUser()
   if (user) {
     const rawRol = user.user_metadata?.rol || 'paciente'
-    userRole.value = rawRol === 'personal_salud' ? 'fisioterapeuta' : rawRol
+    userRole.value = rawRol === 'fisioterapeuta' ? 'fisioterapeuta' : rawRol
   }
 }
 

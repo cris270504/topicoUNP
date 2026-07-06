@@ -1,16 +1,33 @@
 <script setup>
-import { onMounted } from 'vue'
+import { ref,onMounted } from 'vue'
 import { useDashboard } from '@/composables/useDashboard'
 import { ESTADOS_CITA, useCitas } from '@/composables/useCitas'
+import { supabase } from '@/lib/supabaseClient'
 
-const { esAdmin, esSecretaria, esPersonalSalud, esPaciente } = useCitas()
+const { esAdmin, esenfermera, esPersonalSalud, esPaciente } = useCitas()
+// 1. Declaramos la variable para que Vue ya no lance el error "not defined"
+const rolUsuario = ref('')
 
+// 2. Creamos una función para leer el "carnet" de Supabase al cargar la página
+const obtenerRolActual = async () => {
+  const { data: { user }, error } = await supabase.auth.getUser()
+  
+  if (user && user.user_metadata) {
+    // Extraemos el rol oculto (ej: 'admin', 'enfermera', 'fisioterapeuta')
+    rolUsuario.value = user.user_metadata.rol || 'estudiante'
+  }
+}
+console.log("Mi rol es:", rolUsuario);
 const {
   citasHoy, citasProximas, pacientesEnSala, ocupacionPersonal,
   resumenEstados, totalCitasHoy, loading, fetchDashboard
 } = useDashboard()
 
-onMounted(fetchDashboard)
+onMounted(() => {
+  obtenerRolActual(),
+  fetchDashboard()
+  // ... aquí pueden ir tus otras funciones como fetchCitas(), etc.
+})
 
 const formatHora = (iso) => {
   if (!iso) return '—'
@@ -19,8 +36,8 @@ const formatHora = (iso) => {
 
 const formatFechaCompleta = (iso) => {
   if (!iso) return '—'
-  return new Intl.DateTimeFormat('es-PE', { 
-    weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true 
+  return new Intl.DateTimeFormat('es-PE', {
+    weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true
   }).format(new Date(iso))
 }
 </script>
@@ -47,7 +64,7 @@ const formatFechaCompleta = (iso) => {
     </div>
 
     <template v-else>
-      
+
       <div v-if="esPaciente">
         <div class="data-card">
           <h3>Mis próximas citas</h3>
@@ -67,14 +84,16 @@ const formatFechaCompleta = (iso) => {
                 </tr>
                 <tr v-else v-for="c in citasProximas" :key="c.idcita">
                   <td><strong>{{ formatFechaCompleta(c.fecha_hora) }}</strong></td>
-                  <td>{{ c.servicio_topico?.nombre_servicio}}</td>
+                  <td>{{ c.servicio_topico?.nombre_servicio }}</td>
                   <td>
                     <span class="staff-name">
-                      {{ c.personal_salud ? `${c.personal_salud.persona.nombres} ${c.personal_salud.persona.apellidos}` : 'Por asignar' }}
+                      {{ c.fisioterapeuta ? `${c.fisioterapeuta.persona.nombres} ${c.fisioterapeuta.persona.apellidos}`
+                        : 'Por asignar' }}
                     </span>
                   </td>
                   <td>
-                    <span class="estado-badge" :style="`color:${ESTADOS_CITA[c.estado]?.color}; background:${ESTADOS_CITA[c.estado]?.bg}`">
+                    <span class="estado-badge"
+                      :style="`color:${ESTADOS_CITA[c.estado]?.color}; background:${ESTADOS_CITA[c.estado]?.bg}`">
                       {{ ESTADOS_CITA[c.estado]?.label ?? c.estado }}
                     </span>
                   </td>
@@ -85,8 +104,8 @@ const formatFechaCompleta = (iso) => {
         </div>
       </div>
 
-      <div v-if="esAdmin || esSecretaria || esPersonalSalud">
-        
+      <div v-if="esAdmin || esenfermera || esPersonalSalud">
+
         <div class="stats-grid">
           <div class="data-card stat-card">
             <span class="stat-value">{{ totalCitasHoy }}</span>
@@ -128,13 +147,15 @@ const formatFechaCompleta = (iso) => {
                 <tr v-for="p in pacientesEnSala" :key="'sala-' + p.idcita">
                   <td>{{ formatHora(p.fecha_hora) }}</td>
                   <td>
-                    <span class="patient-name">{{ p.paciente?.persona?.nombres }} {{ p.paciente?.persona?.apellidos }}</span>
+                    <span class="patient-name">{{ p.paciente?.persona?.nombres }} {{ p.paciente?.persona?.apellidos
+                    }}</span>
                     <span class="patient-detail">Cod: {{ p.paciente?.codigo_universitario }}</span>
                   </td>
                   <td>{{ p.Servicio_Topico?.nombre_servicio }}</td>
-                  <td>{{ p.personal_salud ? p.personal_salud.persona.apellidos : 'General' }}</td>
+                  <td>{{ p.fisioterapeuta ? p.fisioterapeuta.persona.apellidos : 'General' }}</td>
                   <td>
-                    <span class="estado-badge" :style="`color:${ESTADOS_CITA[p.estado]?.color}; background:${ESTADOS_CITA[p.estado]?.bg}`">
+                    <span class="estado-badge"
+                      :style="`color:${ESTADOS_CITA[p.estado]?.color}; background:${ESTADOS_CITA[p.estado]?.bg}`">
                       {{ ESTADOS_CITA[p.estado]?.label }}
                     </span>
                   </td>
@@ -144,13 +165,13 @@ const formatFechaCompleta = (iso) => {
           </div>
         </div>
 
-        <div class="data-card" v-if="esAdmin || esSecretaria">
+        <div class="data-card" v-if="esAdmin || esenfermera">
           <h3>Ocupación del Personal de Salud — Hoy</h3>
           <div v-if="ocupacionPersonal.length === 0" class="empty-row">
             Ningún especialista tiene citas asignadas hoy.
           </div>
           <div class="ocupacion-grid" v-else>
-            <div v-for="f in ocupacionPersonal" :key="f.idPersonalSalud" class="ocupacion-item">
+            <div v-for="f in ocupacionPersonal" :key="f.idfisioterapeuta" class="ocupacion-item">
               <div class="ocupacion-header">
                 <span class="staff-name">{{ f.nombre }}</span>
                 <span class="staff-detail">{{ f.especialidad }}</span>
@@ -172,7 +193,7 @@ const formatFechaCompleta = (iso) => {
                 <tr>
                   <th>Hora</th>
                   <th>Paciente</th>
-                  <th v-if="esAdmin || esSecretaria">Especialista</th>
+                  <th v-if="esAdmin || esenfermera">Especialista</th>
                   <th>Servicio</th>
                   <th>Estado</th>
                 </tr>
@@ -184,14 +205,16 @@ const formatFechaCompleta = (iso) => {
                 <tr v-else v-for="c in citasHoy" :key="c.idcita">
                   <td>{{ formatHora(c.fecha_hora) }}</td>
                   <td>
-                    <span class="patient-name">{{ c.paciente?.persona?.nombres }} {{ c.paciente?.persona?.apellidos }}</span>
+                    <span class="patient-name">{{ c.paciente?.persona?.nombres }} {{ c.paciente?.persona?.apellidos
+                    }}</span>
                   </td>
-                  <td v-if="esAdmin || esSecretaria">
-                    <span class="staff-name">{{ c.personal_salud ? c.personal_salud.persona.nombres : '—' }}</span>
+                  <td v-if="esAdmin || esenfermera">
+                    <span class="staff-name">{{ c.fisioterapeuta ? c.fisioterapeuta.persona.nombres : '—' }}</span>
                   </td>
                   <td>{{ c.servicio_topico?.nombre_servicio }}</td>
                   <td>
-                    <span class="estado-badge" :style="`color:${ESTADOS_CITA[c.estado]?.color}; background:${ESTADOS_CITA[c.estado]?.bg}`">
+                    <span class="estado-badge"
+                      :style="`color:${ESTADOS_CITA[c.estado]?.color}; background:${ESTADOS_CITA[c.estado]?.bg}`">
                       {{ ESTADOS_CITA[c.estado]?.label ?? c.estado }}
                     </span>
                   </td>
@@ -236,7 +259,9 @@ const formatFechaCompleta = (iso) => {
   font-weight: 500;
 }
 
-.stat-card.alerta .stat-value { color: #ef4444; }
+.stat-card.alerta .stat-value {
+  color: #ef4444;
+}
 
 /* Resumen de estados */
 .estado-resumen-grid {
@@ -304,21 +329,26 @@ const formatFechaCompleta = (iso) => {
 }
 
 @media (max-width: 1024px) {
-  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 @media (max-width: 480px) {
-  .stats-grid { grid-template-columns: 1fr; }
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 
 /* Mejora el padding interno de las tarjetas (data-card) */
 .data-card {
-    background: #ffffff;
-    border-radius: var(--radius-md);
-    padding: 24px; /* Asegura que lo que está adentro no toque el borde */
-    border: 1px solid var(--gray-200);
-    margin-bottom: 20px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  background: #ffffff;
+  border-radius: var(--radius-md);
+  padding: 24px;
+  /* Asegura que lo que está adentro no toque el borde */
+  border: 1px solid var(--gray-200);
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 </style>

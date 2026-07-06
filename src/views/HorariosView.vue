@@ -31,7 +31,7 @@ const fetchHorarios = async () => {
     const { data, error } = await supabase
       .from('horario')
       .select('*')
-      .eq('idpersonalsalud', userId.value)
+      .eq('idfisioterapeuta', userId.value)
       .order('dia_semana', { ascending: true })
       .order('hora_inicio', { ascending: true })
 
@@ -84,14 +84,14 @@ const guardarHorarios = async () => {
     const { error: errDel } = await supabase
       .from('horario')
       .delete()
-      .eq('idpersonalsalud', userId.value)
+      .eq('idfisioterapeuta', userId.value)
 
     if (errDel) throw errDel
 
     // 3. Insertamos el nuevo bloque de horarios completo
     if (horarios.value.length > 0) {
       const inserts = horarios.value.map(h => ({
-        idpersonalsalud: userId.value,
+        idfisioterapeuta: userId.value,
         dia_semana: h.dia_semana,
         hora_inicio: h.hora_inicio,
         hora_fin: h.hora_fin
@@ -139,7 +139,7 @@ onMounted(() => {
 
     <div class="horarios-grid">
       <div v-for="dia in DIAS_SEMANA" :key="dia.id" class="data-card dia-card">
-        
+
         <div class="dia-header">
           <h3>{{ dia.label }}</h3>
           <button class="btn-add-turno" @click="agregarTurno(dia.id)" title="Agregar bloque de hora">
@@ -161,7 +161,7 @@ onMounted(() => {
             </button>
           </div>
         </div>
-        
+
       </div>
     </div>
 
@@ -206,7 +206,10 @@ onMounted(() => {
   cursor: pointer;
   padding: 4px;
 }
-.btn-add-turno:hover { text-decoration: underline; }
+
+.btn-add-turno:hover {
+  text-decoration: underline;
+}
 
 .dia-body {
   padding: 16px;
@@ -242,7 +245,10 @@ onMounted(() => {
   color: var(--navy);
   outline: none;
 }
-.turno-row input[type="time"]:focus { border-color: var(--blue); }
+
+.turno-row input[type="time"]:focus {
+  border-color: var(--blue);
+}
 
 .turno-row span {
   font-size: 12px;
@@ -265,5 +271,8 @@ onMounted(() => {
   cursor: pointer;
   transition: opacity 0.2s;
 }
-.btn-remove:hover { opacity: 0.8; }
+
+.btn-remove:hover {
+  opacity: 0.8;
+}
 </style>

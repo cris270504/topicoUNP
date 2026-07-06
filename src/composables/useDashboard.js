@@ -12,10 +12,10 @@ export function useDashboard() {
   const citasProximas = ref([]) // Para la vista del paciente
   const pacientesEnSala = ref([])
   const ocupacionPersonal = ref([])
-  
+
   const totalCitasHoy = ref(0)
   const resumenEstados = ref({
-    pendiente: 0, confirmada: 0, en_triaje: 0, 
+    pendiente: 0, confirmada: 0, en_triaje: 0,
     en_consulta: 0, completada: 0, cancelada: 0, ausente: 0
   })
 
@@ -35,7 +35,7 @@ export function useDashboard() {
           .select(`
             idcita, fecha_hora, estado, motivo_consulta,
             servicio_topico ( nombre_servicio ),
-            personal_salud ( persona ( nombres, apellidos ) )
+            fisioterapeuta ( persona ( nombres, apellidos ) )
           `)
           .eq('idpaciente', userId.value)
           .gte('fecha_hora', inicioDia) // Traer citas desde hoy en adelante
@@ -46,12 +46,12 @@ export function useDashboard() {
         return // Fin de la ejecución para el paciente
       }
 
-      // ── 2. Vista Clínica (Administrador, Secretaria o Personal de Salud) ──
+      // ── 2. Vista Clínica (Administrador, enfermera o Personal de Salud) ──
       let query = supabase.from('cita')
         .select(`
           idcita, fecha_hora, estado, paciente_en_sala,
           paciente ( idpaciente, codigo_universitario, persona ( nombres, apellidos, celular ) ),
-          personal_salud ( idpersonalsalud, especialidad, persona ( nombres, apellidos ) ),
+          fisioterapeuta ( idfisioterapeuta, especialidad, persona ( nombres, apellidos ) ),
           servicio_topico ( nombre_servicio )
         `)
         .gte('fecha_hora', inicioDia)
@@ -59,7 +59,7 @@ export function useDashboard() {
 
       // Si es médico/enfermera, solo ve SUS citas del día
       if (esPersonalSalud.value) {
-        query = query.eq('idpersonalsalud', userId.value)
+        query = query.eq('idfisioterapeuta', userId.value)
       }
 
       const { data, error } = await query.order('fecha_hora', { ascending: true })
@@ -85,13 +85,13 @@ export function useDashboard() {
         }
 
         // Ocupación del personal (Agrupación)
-        if (cita.Personal_Salud) {
-          const idPersonal = cita.Personal_Salud.idPersonalSalud
+        if (cita.fisioterapeuta) {
+          const idPersonal = cita.fisioterapeuta.idfisioterapeuta
           if (!ocupacionMap[idPersonal]) {
             ocupacionMap[idPersonal] = {
-              idPersonalSalud: idPersonal,
-              nombre: `${cita.Personal_Salud.Persona.nombres} ${cita.Personal_Salud.Persona.apellidos}`,
-              especialidad: cita.Personal_Salud.especialidad,
+              idfisioterapeuta: idPersonal,
+              nombre: `${cita.fisioterapeuta.Persona.nombres} ${cita.fisioterapeuta.Persona.apellidos}`,
+              especialidad: cita.fisioterapeuta.especialidad,
               totalCitas: 0,
               atendidas: 0,
               pendientes: 0

@@ -10,7 +10,6 @@ const route = useRoute()
 const showUserMenu = ref(false)
 const user = ref(null)
 
-// ✅ REFACTORIZADO: Usar userUtils para consistencia
 const fetchUserData = async () => {
   const { data: { user: currentUser } } = await supabase.auth.getUser()
   user.value = currentUser
@@ -20,7 +19,6 @@ const userRole = computed(() => getUserRole(user.value))
 const displayName = computed(() => getUserDisplayName(user.value))
 const userInitials = computed(() => getUserInitials(user.value))
 
-// Título adaptativo de pan de azúcar (Breadcrumb)
 const pageTitle = computed(() => {
   const map = {
     dashboard: 'Dashboard',

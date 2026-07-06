@@ -8,7 +8,7 @@
 /**
  * Extrae el rol del usuario desde metadata
  * @param {Object} user - Usuario de Supabase
- * @returns {string} Rol del usuario ('admin', 'secretaria', 'fisioterapeuta', 'paciente')
+ * @returns {string} Rol del usuario ('admin', 'enfermera', 'fisioterapeuta', 'paciente')
  */
 export const getUserRole = (user) => {
   return user?.user_metadata?.rol || 'paciente'
@@ -21,10 +21,10 @@ export const getUserRole = (user) => {
  */
 export const getUserDisplayName = (user) => {
   if (!user) return 'Usuario'
-  
+
   const { nombres = '', apellidos = '' } = user.user_metadata || {}
   const fullName = (nombres + ' ' + apellidos).trim()
-  
+
   return fullName || user.email?.split('@')[0] || 'Usuario'
 }
 
@@ -58,13 +58,13 @@ export const hasRole = (user, roles) => {
 }
 
 /**
- * Verifica si el usuario puede gestionar recursos (secretaria o admin)
+ * Verifica si el usuario puede gestionar recursos (enfermera o admin)
  * @param {Object} user - Usuario de Supabase
  * @returns {boolean}
  */
 export const canManage = (user) => {
   const userRole = getUserRole(user)
-  return ['secretaria', 'admin'].includes(userRole)
+  return ['enfermera', 'admin'].includes(userRole)
 }
 
 /**
@@ -85,7 +85,7 @@ export const isTherapist = (user) => {
 export const getRoleLabel = (role) => {
   const labels = {
     admin: 'Administrador',
-    secretaria: 'Secretaria',
+    enfermera: 'enfermera',
     fisioterapeuta: 'Fisioterapeuta',
     paciente: 'Paciente'
   }
@@ -100,7 +100,7 @@ export const getRoleLabel = (role) => {
 export const getRoleBadgeStyle = (role) => {
   const styles = {
     admin: { bg: '#e2e8f0', color: '#1a3a6e' },
-    secretaria: { bg: '#fef3c7', color: '#d97706' },
+    enfermera: { bg: '#fef3c7', color: '#d97706' },
     fisioterapeuta: { bg: '#dceef8', color: '#4a90c4' },
     paciente: { bg: '#d1fae5', color: '#059669' }
   }
@@ -117,7 +117,7 @@ export const getUserData = (user) => {
   if (!user) {
     return { nombres: '', apellidos: '', email: '', rol: 'paciente' }
   }
-  
+
   return {
     nombres: user.user_metadata?.nombres || '',
     apellidos: user.user_metadata?.apellidos || '',

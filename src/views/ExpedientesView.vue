@@ -26,7 +26,7 @@ const fetchExpedientes = async () => {
           persona ( nombres, apellidos, numero_documento, tipo_documento, celular )
         )
       `)
-      .eq('idpersonalsalud', user.id)
+      .eq('idfisioterapeuta', user.id)
       .not('estado', 'in', '("cancelada")')
       .order('fecha_hora', { ascending: false })
 
@@ -88,12 +88,12 @@ const formatFecha = (iso) => {
 
 const estadoInfo = (estado) => {
   const map = {
-    completada:  { label: 'Completada',  bg: '#d1fae5', color: '#065f46' },
+    completada: { label: 'Completada', bg: '#d1fae5', color: '#065f46' },
     en_consulta: { label: 'En consulta', bg: '#dbeafe', color: '#1e40af' },
-    en_triaje:   { label: 'En triaje',   bg: '#ede9fe', color: '#5b21b6' },
-    confirmada:  { label: 'Confirmada',  bg: '#d1fae5', color: '#065f46' },
-    pendiente:   { label: 'Pendiente',   bg: '#fef3c7', color: '#92400e' },
-    ausente:     { label: 'Ausente',     bg: '#f3f4f6', color: '#374151' },
+    en_triaje: { label: 'En triaje', bg: '#ede9fe', color: '#5b21b6' },
+    confirmada: { label: 'Confirmada', bg: '#d1fae5', color: '#065f46' },
+    pendiente: { label: 'Pendiente', bg: '#fef3c7', color: '#92400e' },
+    ausente: { label: 'Ausente', bg: '#f3f4f6', color: '#374151' },
   }
   return map[estado] ?? { label: estado, bg: '#f1f5f9', color: '#334155' }
 }
@@ -119,7 +119,7 @@ onMounted(fetchExpedientes)
           <span class="stat-label">pacientes</span>
         </div>
         <div class="stat-pill">
-          <span class="stat-number">{{ expedientes.reduce((s, e) => s + e.citasCompletadas, 0) }}</span>
+          <span class="stat-number">{{expedientes.reduce((s, e) => s + e.citasCompletadas, 0)}}</span>
           <span class="stat-label">sesiones completadas</span>
         </div>
       </div>
@@ -127,12 +127,8 @@ onMounted(fetchExpedientes)
 
     <div class="data-card search-bar-card">
       <div class="input-group" style="max-width: 460px;">
-        <input
-          v-model="searchQuery"
-          type="text"
-          placeholder="Buscar por nombre, documento o código UNP..."
-          style="background: #ffffff;"
-        />
+        <input v-model="searchQuery" type="text" placeholder="Buscar por nombre, documento o código UNP..."
+          style="background: #ffffff;" />
       </div>
     </div>
 
@@ -174,26 +170,23 @@ onMounted(fetchExpedientes)
               </td>
               <td>{{ formatFecha(exp.ultimaFecha) }}</td>
               <td>
-                <span
-                  class="estado-badge"
-                  :style="{ background: estadoInfo(exp.ultimoEstado).bg, color: estadoInfo(exp.ultimoEstado).color }"
-                >
+                <span class="estado-badge"
+                  :style="{ background: estadoInfo(exp.ultimoEstado).bg, color: estadoInfo(exp.ultimoEstado).color }">
                   {{ estadoInfo(exp.ultimoEstado).label }}
                 </span>
               </td>
               <td>
-                <button
-                  class="btn-secondary"
+                <button class="btn-secondary"
                   style="padding: 6px 14px; font-size: 12px; border-radius: 6px; background: #ccfbf1; color: #0f766e;"
-                  @click="irAHistoria(exp.idPaciente)"
-                >
+                  @click="irAHistoria(exp.idPaciente)">
                   Historia Clínica
                 </button>
               </td>
             </tr>
             <tr v-if="filtrados.length === 0 && !loading">
               <td colspan="7" class="empty-row">
-                {{ searchQuery ? 'No se encontraron resultados para la búsqueda.' : 'Aún no tienes pacientes atendidos.' }}
+                {{ searchQuery ? 'No se encontraron resultados para la búsqueda.' : 'Aún no tienes pacientes atendidos.'
+                }}
               </td>
             </tr>
           </tbody>

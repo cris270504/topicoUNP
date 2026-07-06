@@ -4,7 +4,7 @@
  * * MEJORAS:
  * - Implementación de las 3 modalidades del ciclo clínico.
  * - Algoritmo integrado para sugerencia óptima de Paquetes + Sesiones Sueltas.
- * - Capacidad de ajuste manual de combinación para la secretaria.
+ * - Capacidad de ajuste manual de combinación para la enfermera.
  * - Soporte para el Escenario B (Recarga de tratamiento existente) mediante props.
  * - Enlace a evaluaciones previas desvinculadas.
  * - Formateo y validación de horarios en zona horaria local (-05:00).
@@ -42,7 +42,7 @@ const observaciones = ref('')
 const sesionesDeseadas = ref(1)
 const inputPaquetes = ref(0)
 const inputSueltas = ref(0)
-const overrideSecretaria = ref(false)
+const overrideenfermera = ref(false)
 
 // Vinculación con evaluaciones previas
 const vieneDeEvaluacionPrevia = ref(false)
@@ -100,7 +100,7 @@ watch([sesionesDeseadas, modalidad, paqueteSeleccionado], ([cant, mod, idPaquete
     return
   }
 
-  if (mod === 'tratamiento' && !overrideSecretaria.value) {
+  if (mod === 'tratamiento' && !overrideenfermera.value) {
     if (!idPaquete || paquetesDisponibles.value.length === 0) {
       inputPaquetes.value = 0
       inputSueltas.value = cant
@@ -116,8 +116,8 @@ watch([sesionesDeseadas, modalidad, paqueteSeleccionado], ([cant, mod, idPaquete
   }
 })
 
-// 3. Recálculo si la secretaria desmarca el checkbox manual
-watch(overrideSecretaria, (manual) => {
+// 3. Recálculo si la enfermera desmarca el checkbox manual
+watch(overrideenfermera, (manual) => {
   if (!manual && modalidad.value === 'tratamiento' && paqueteSeleccionadoData.value) {
     const size = paqueteSeleccionadoData.value.cantidad_sesiones || 1
     inputPaquetes.value = Math.floor(sesionesDeseadas.value / size)
@@ -140,7 +140,7 @@ const precioEstimado = computed(() => {
 
 
 watch(paqueteSeleccionado, (nuevoIdPaquete) => {
-  if (modalidad.value === 'tratamiento' && !overrideSecretaria.value && nuevoIdPaquete) {
+  if (modalidad.value === 'tratamiento' && !overrideenfermera.value && nuevoIdPaquete) {
     const paqueteManual = paquetesDisponibles.value.find(p => p.idServicio === nuevoIdPaquete)
     if (paqueteManual) {
       const size = paqueteManual.cantidad_sesiones || 1
@@ -304,7 +304,7 @@ const resetForm = () => {
   if (props.tratamientoARecargar) {
     modalidad.value = 'tratamiento'
     sesionesDeseadas.value = 1
-    overrideSecretaria.value = false
+    overrideenfermera.value = false
 
     idPaciente.value = props.tratamientoARecargar.idPaciente
     searchPaciente.value = props.tratamientoARecargar.nombrePaciente
@@ -333,7 +333,7 @@ const resetForm = () => {
     searchFisio.value = ''
     modalidad.value = null
     sesionesDeseadas.value = 1
-    overrideSecretaria.value = false
+    overrideenfermera.value = false
     vieneDeEvaluacionPrevia.value = false
     idEvaluacionSesion.value = null
   }
@@ -490,7 +490,7 @@ const nombrePaciente = (p) => `${p.Persona?.nombres ?? ''} ${p.Persona?.apellido
 
                 <div v-if="modalidad === 'tratamiento'" class="input-group">
                   <label>Tarifa a aplicar</label>
-                  <select v-model="paqueteSeleccionado" @change="overrideSecretaria = false" required>
+                  <select v-model="paqueteSeleccionado" @change="overrideenfermera = false" required>
                     <option v-for="p in paquetesDisponibles" :key="p.idServicio" :value="p.idServicio">
                       {{ p.nombre }} ({{ p.cantidad_sesiones }} ses.) — S/ {{ p.precio }}
                     </option>
@@ -511,7 +511,7 @@ const nombrePaciente = (p) => `${p.Persona?.nombres ?? ''} ${p.Persona?.apellido
                       precioSesionSuelta).toFixed(2) }})</div>
                   </div>
                   <div style="margin-top: 5px;">
-                    <input type="checkbox" id="chkManual" v-model="overrideSecretaria" />
+                    <input type="checkbox" id="chkManual" v-model="overrideenfermera" />
                     <label for="chkManual"
                       style="font-size: 11.5px; margin-left: 5px; cursor: pointer; color: #475569;">Ajustar
                       combinación manualmente</label>
@@ -519,7 +519,7 @@ const nombrePaciente = (p) => `${p.Persona?.nombres ?? ''} ${p.Persona?.apellido
                 </div>
               </div>
 
-              <div v-if="overrideSecretaria && modalidad === 'tratamiento'" class="form-grid style-manual"
+              <div v-if="overrideenfermera && modalidad === 'tratamiento'" class="form-grid style-manual"
                 style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #cbd5e1;">
                 <div class="input-group">
                   <label>Modificar Paquetes</label>
@@ -546,7 +546,9 @@ const nombrePaciente = (p) => `${p.Persona?.nombres ?? ''} ${p.Persona?.apellido
                 <label>Horario disponible <span class="req">*</span></label>
                 <select v-model="hora" required :disabled="!fecha || !idFisioterapeuta || loadingSlots">
                   <option value="" disabled>
-                    {{ loadingSlots ? 'Buscando huecos libres...' : (!idFisioterapeuta ? '⚠️ Falta Especialista' :(!fecha ? '⚠️ Falta Fecha' : (slotsFiltrados.length === 0 ? '❌ No hay turnos ese día' : '— Seleccione hora —'))) }}
+                    {{ loadingSlots ? 'Buscando huecos libres...' : (!idFisioterapeuta ? '⚠️ Falta Especialista'
+                      : (!fecha ? '⚠️ Falta Fecha' : (slotsFiltrados.length === 0 ? '❌ No hay turnos ese día' : '—
+                    Seleccione hora —'))) }}
                   </option>
                   <option v-for="slot in slotsFiltrados" :key="slot" :value="slot">{{ slot }}</option>
                 </select>
@@ -592,7 +594,8 @@ const nombrePaciente = (p) => `${p.Persona?.nombres ?? ''} ${p.Persona?.apellido
                   <label>Hora</label>
                   <select v-model="sesionExtra.hora" required :disabled="!sesionExtra.fecha || sesionExtra.loading">
                     <option value="" disabled>
-                      {{ sesionExtra.loading ? 'Buscando...' : (sesionExtra.slots?.length ? '— Seleccionar —' : 'Sin turnos') }}
+                      {{ sesionExtra.loading ? 'Buscando...' : (sesionExtra.slots?.length ? '— Seleccionar —' : 'Sin
+                      turnos') }}
                     </option>
                     <option v-for="slot in sesionExtra.slots" :key="slot" :value="slot">{{ slot }}</option>
                   </select>

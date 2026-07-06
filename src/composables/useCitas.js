@@ -56,17 +56,17 @@ export function useCitas() {
 
     // ── Computed de rol ─────────────────────────────────────────
     const esPersonalSalud = computed(() => userRole.value === 'fisioterapeuta')
-    const esSecretaria = computed(() => userRole.value === 'secretaria')
+    const esenfermera = computed(() => userRole.value === 'enfermera')
     const esPaciente = computed(() => userRole.value === 'paciente')
     const esAdmin = computed(() => userRole.value === 'admin')
-    const puedeGestionar = computed(() => esSecretaria.value || esAdmin.value)
+    const puedeGestionar = computed(() => esenfermera.value || esAdmin.value)
 
     // ── initUser ────────────────────────────────────────────────
     const initUser = async () => {
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
             const rawRol = user.user_metadata?.rol || 'paciente'
-            userRole.value = rawRol === 'personal_salud' ? 'fisioterapeuta' : rawRol
+            userRole.value = rawRol === 'fisioterapeuta' ? 'fisioterapeuta' : rawRol
             userId.value = user.id
         } else {
             clearUser() // Limpia la memoria si no hay sesión
@@ -95,14 +95,14 @@ export function useCitas() {
                     idcita, fecha_hora, motivo_consulta, estado, paciente_en_sala, created_at,
                     servicio_topico ( idservicio, nombre_servicio, duracion_estimada_minutos ),
                     paciente ( idpaciente, codigo_universitario, tipo_usuario, persona ( nombres, apellidos, celular ) ),
-                    personal_salud ( idpersonalsalud, especialidad, persona ( nombres, apellidos ) )
+                    fisioterapeuta ( idfisioterapeuta, especialidad, persona ( nombres, apellidos ) )
                 `)
 
             // Filtros de seguridad por rol
             if (esPaciente.value && userId.value) {
                 query = query.eq('idpaciente', userId.value)
             } else if (esPersonalSalud.value && userId.value) {
-                query = query.eq('idpersonalsalud', userId.value)
+                query = query.eq('idfisioterapeuta', userId.value)
             }
 
             // Filtros de búsqueda
@@ -115,7 +115,7 @@ export function useCitas() {
             }
 
             if (filtros.estado) query = query.eq('estado', filtros.estado)
-            if (filtros.idPersonalSalud) query = query.eq('idpersonalsalud', filtros.idPersonalSalud)
+            if (filtros.idfisioterapeuta) query = query.eq('idfisioterapeuta', filtros.idfisioterapeuta)
 
             const { data, error } = await query.order('fecha_hora', { ascending: true })
             if (error) throw error
@@ -125,14 +125,14 @@ export function useCitas() {
                 ...c,
                 idCita: c.idcita,
                 idSesion: c.idcita,
-                idFisioterapeuta: c.idpersonalsalud,
+                idFisioterapeuta: c.idfisioterapeuta,
                 idPaciente: c.paciente?.idpaciente,
                 paciente_nombres: c.paciente?.persona?.nombres ?? '',
                 paciente_apellidos: c.paciente?.persona?.apellidos ?? '',
                 paciente_celular: c.paciente?.persona?.celular ?? '',
-                fisio_nombres: c.personal_salud?.persona?.nombres ?? '',
-                fisio_apellidos: c.personal_salud?.persona?.apellidos ?? '',
-                fisio_especialidad: c.personal_salud?.especialidad ?? '',
+                fisio_nombres: c.fisioterapeuta?.persona?.nombres ?? '',
+                fisio_apellidos: c.fisioterapeuta?.persona?.apellidos ?? '',
+                fisio_especialidad: c.fisioterapeuta?.especialidad ?? '',
             }))
         } catch (err) {
             showAlert('Error al cargar citas: ' + err.message, 'error')
@@ -144,9 +144,9 @@ export function useCitas() {
     // ── fetchPersonalSalud ──────────────────────────────────────
     const fetchPersonalSalud = async () => {
         const { data, error } = await supabase
-            .from('personal_salud')
+            .from('fisioterapeuta')
             .select(`
-                idpersonalsalud, tipo_personal, especialidad, activo,
+                idfisioterapeuta, tipo_personal, especialidad, activo,
                 persona ( nombres, apellidos )
             `)
             .eq('activo', true)
@@ -154,7 +154,7 @@ export function useCitas() {
         if (error) { showAlert('Error al cargar personal: ' + error.message, 'error'); return }
         personalSalud.value = (data ?? []).map(p => ({
             ...p,
-            idPersonalSalud: p.idpersonalsalud,
+            idfisioterapeuta: p.idfisioterapeuta,
             Persona: p.persona,
         }))
     }
@@ -188,15 +188,15 @@ export function useCitas() {
 
     // ── crearCita (Flujo Simplificado) ──────────────────────────
     const crearCita = async (payload) => {
-        const { idPaciente, idPersonalSalud, idServicio, fecha_hora, motivo_consulta } = payload
+        const { idPaciente, idfisioterapeuta, idServicio, fecha_hora, motivo_consulta } = payload
 
         if (!idPaciente || !idServicio || !fecha_hora) {
             showAlert('Faltan datos obligatorios para agendar.', 'error')
             return false
         }
 
-        if (idPersonalSalud) {
-            const ocupado = await verificarDisponibilidad(idPersonalSalud, fecha_hora)
+        if (idfisioterapeuta) {
+            const ocupado = await verificarDisponibilidad(idfisioterapeuta, fecha_hora)
             if (ocupado) {
                 showAlert('El especialista ya tiene una cita en ese horario.', 'error')
                 return false
@@ -209,7 +209,7 @@ export function useCitas() {
                 .from('cita')
                 .insert({
                     idpaciente: idPaciente,
-                    idpersonalsalud: idPersonalSalud || null,
+                    idfisioterapeuta: idfisioterapeuta || null,
                     idservicio: idServicio,
                     fecha_hora,
                     motivo_consulta,
@@ -230,7 +230,7 @@ export function useCitas() {
     }
 
     // ── reprogramarCita ─────────────────────────────────────────
-    const reprogramarCita = async ({ idCita, idPersonalSaludNuevo, nuevaFechaHora, motivo }) => {
+    const reprogramarCita = async ({ idCita, idfisioterapeutaNuevo, nuevaFechaHora, motivo }) => {
         if (!motivo?.trim() || !nuevaFechaHora) {
             showAlert('Faltan datos para reprogramar.', 'error'); return false
         }
@@ -247,7 +247,7 @@ export function useCitas() {
                 .from('cita')
                 .update({
                     fecha_hora: nuevaFechaHora,
-                    idpersonalsalud: idPersonalSaludNuevo || null,
+                    idfisioterapeuta: idfisioterapeutaNuevo || null,
                     motivo_consulta: motivo
                 })
                 .eq('idcita', idCita)
@@ -302,7 +302,7 @@ export function useCitas() {
     }
 
     // ── verificarDisponibilidad ─────────────────────────────────
-    const verificarDisponibilidad = async (idPersonalSalud, fecha_hora) => {
+    const verificarDisponibilidad = async (idfisioterapeuta, fecha_hora) => {
         const fecha = new Date(fecha_hora)
         const year = fecha.getFullYear()
         const month = String(fecha.getMonth() + 1).padStart(2, '0')
@@ -318,7 +318,7 @@ export function useCitas() {
         const { data, error } = await supabase
             .from('cita')
             .select('idcita')
-            .eq('idpersonalsalud', idPersonalSalud)
+            .eq('idfisioterapeuta', idfisioterapeuta)
             .not('estado', 'in', '("cancelada","ausente","completada")')
             .gte('fecha_hora', inicioBusqueda)
             .lt('fecha_hora', finBusqueda)
@@ -350,7 +350,7 @@ export function useCitas() {
         loading, loadingAccion, userRole, userId,
 
         esPersonalSalud, esFisioterapeuta: esPersonalSalud,
-        esSecretaria, esPaciente, esAdmin, puedeGestionar,
+        esenfermera, esPaciente, esAdmin, puedeGestionar,
 
         initUser, fetchCitas, fetchPersonalSalud, fetchFisios: fetchPersonalSalud,
         fetchPacientes, fetchServicios,
