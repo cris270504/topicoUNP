@@ -1,10 +1,8 @@
 <script setup>
 import { ref,onMounted } from 'vue'
 import { useDashboard } from '@/composables/useDashboard'
-import { ESTADOS_CITA, useCitas } from '@/composables/useCitas'
+import { ESTADOS_CITA } from '@/composables/useCitas'
 import { supabase } from '@/lib/supabaseClient'
-
-const { esAdmin, esenfermera, esPersonalSalud, esPaciente } = useCitas()
 // 1. Declaramos la variable para que Vue ya no lance el error "not defined"
 const rolUsuario = ref('')
 
@@ -19,7 +17,8 @@ const obtenerRolActual = async () => {
 }
 const {
   citasHoy, citasProximas, pacientesEnSala, ocupacionPersonal,
-  resumenEstados, totalCitasHoy, loading, fetchDashboard
+  resumenEstados, totalCitasHoy, loading, fetchDashboard,
+  esAdmin, esEnfermera, esFisioterapeuta, esPaciente
 } = useDashboard()
 
 onMounted(() => {
@@ -100,7 +99,7 @@ const formatFechaCompleta = (iso) => {
         </div>
       </div>
 
-      <div v-if="esAdmin || esenfermera || esPersonalSalud">
+      <div v-if="esAdmin || esEnfermera || esFisioterapeuta">
 
         <div class="stats-grid">
           <div class="data-card stat-card">
@@ -147,7 +146,7 @@ const formatFechaCompleta = (iso) => {
                     }}</span>
                     <span class="patient-detail">Cod: {{ p.paciente?.codigo_universitario }}</span>
                   </td>
-                  <td>{{ p.Servicio_Topico?.nombre_servicio }}</td>
+                  <td>{{ p.servicio_topico?.nombre_servicio }}</td>
                   <td>{{ p.fisioterapeuta ? p.fisioterapeuta.persona.apellidos : 'General' }}</td>
                   <td>
                     <span class="estado-badge"
@@ -161,7 +160,7 @@ const formatFechaCompleta = (iso) => {
           </div>
         </div>
 
-        <div class="data-card" v-if="esAdmin || esenfermera">
+        <div class="data-card" v-if="esAdmin || esEnfermera">
           <h3>Ocupación del Personal de Salud — Hoy</h3>
           <div v-if="ocupacionPersonal.length === 0" class="empty-row">
             Ningún especialista tiene citas asignadas hoy.
@@ -182,14 +181,14 @@ const formatFechaCompleta = (iso) => {
         </div>
 
         <div class="data-card">
-          <h3>{{ esPersonalSalud ? 'Mi Agenda de Hoy' : 'Agenda General de Hoy' }}</h3>
+          <h3>{{ esFisioterapeuta ? 'Mi Agenda de Hoy' : 'Agenda General de Hoy' }}</h3>
           <div class="table-responsive">
             <table class="content-table">
               <thead>
                 <tr>
                   <th>Hora</th>
                   <th>Paciente</th>
-                  <th v-if="esAdmin || esenfermera">Especialista</th>
+                  <th v-if="esAdmin || esEnfermera">Especialista</th>
                   <th>Servicio</th>
                   <th>Estado</th>
                 </tr>
@@ -204,7 +203,7 @@ const formatFechaCompleta = (iso) => {
                     <span class="patient-name">{{ c.paciente?.persona?.nombres }} {{ c.paciente?.persona?.apellidos
                     }}</span>
                   </td>
-                  <td v-if="esAdmin || esenfermera">
+                  <td v-if="esAdmin || esEnfermera">
                     <span class="staff-name">{{ c.fisioterapeuta ? c.fisioterapeuta.persona.nombres : '—' }}</span>
                   </td>
                   <td>{{ c.servicio_topico?.nombre_servicio }}</td>
