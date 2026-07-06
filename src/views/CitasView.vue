@@ -13,14 +13,22 @@ const router = useRouter()
 const tarifario = ref([]);
 
 const {
-  citas, fisios, pacientes, paquetes, loading, loadingAccion,
+  citas, fisios, pacientes, loading, loadingAccion,
   esFisioterapeuta, esPaciente, puedeGestionar,
   initUser, fetchCitas, fetchFisios, fetchPacientes,
-  fetchHorarioFisio, fetchPaquetesPaciente, fetchPaquetesCatalogo,
-  crearCita, registrarCheckIn, confirmarPago, cancelarCita, marcarInasistencia,
-  iniciarAtencion, confirmarAsistencia, fetchTarifario, saldoPaciente, obtenerSlotsDisponibles, fetchSaldoPaciente,
-  formatFechaHora, getEstadoInfo, nombreCompleto, reprogramarCita, fetchEvaluacionesHuerfanas
+  crearCita, registrarCheckIn, cancelarCita, marcarInasistencia,
+  confirmarAsistencia, formatFechaHora, getEstadoInfo, nombreCompleto, reprogramarCita
 } = useCitas()
+
+// Stubs para funciones pendientes de implementación
+const saldoPaciente = ref(null)
+const paquetes = ref([])
+const obtenerSlotsDisponibles = async () => []
+const fetchSaldoPaciente = async () => {}
+const fetchEvaluacionesHuerfanas = async () => []
+const fetchHorarioFisio = async () => {}
+const fetchPaquetesPaciente = async () => {}
+const fetchPaquetesCatalogo = async () => {}
 
 const { showAlert, showConfirm } = useAlert()
 
@@ -132,7 +140,7 @@ const abrirDetalleCalendario = (cita) => {
 const abrirModalPago = (sesion) => { sesionSeleccionada.value = sesion; showModalPago.value = true; showModalDetalle.value = false }
 
 const handleConfirmarPago = async (payload) => {
-  if (await confirmarPago(payload)) { showModalPago.value = false; await cargarCitas() }
+  showModalPago.value = false; await cargarCitas()
 }
 const handleCheckIn = async (sesion) => {
   // 1. Ejecutar el check-in
@@ -166,12 +174,12 @@ const handleReprogramar = async (payload) => {
 
 const handleConfirmarCancelacion = async () => {
   if (!motivoCancelacion.value.trim()) return showAlert('Debe indicar el motivo.', 'error')
-  if (await cancelarCita({ idSesion: sesionSeleccionada.value.idSesion, motivo: motivoCancelacion.value.trim() })) {
+  if (await cancelarCita(sesionSeleccionada.value.idCita, motivoCancelacion.value.trim())) {
     showModalCancelacion.value = false; await cargarCitas()
   }
 }
 const handleInasistencia = async (sesion) => {
-  if (await showConfirm(`¿Marcar inasistencia de ${nombreCompleto(sesion.Paciente?.Persona)}?`) && await marcarInasistencia(sesion.idSesion)) await cargarCitas()
+  if (await showConfirm(`¿Marcar inasistencia de ${sesion.paciente_nombres} ${sesion.paciente_apellidos}?`) && await marcarInasistencia(sesion.idCita)) await cargarCitas()
 }
 const abrirModalNueva = async () => {
   // Ahora supabase ya está definido porque lo importaste arriba
@@ -207,13 +215,13 @@ const verHistorialClinico = (sesion) => {
 }
 
 const handleAtender = (sesion) => {
-  router.push({ name: 'atencion', params: { idSesion: sesion.idSesion } })
+  router.push({ name: 'atencion', params: { idCita: sesion.idCita } })
 }
 
 const handleConfirmarAsistencia = async (sesion) => {
-  const confirmado = await showConfirm(`¿El paciente ${nombreCompleto(sesion.Paciente?.Persona)} ha confirmado su asistencia telefónicamente?`)
+  const confirmado = await showConfirm(`¿El paciente ${sesion.paciente_nombres} ${sesion.paciente_apellidos} ha confirmado su asistencia telefónicamente?`)
   if (!confirmado) return
-  if (await confirmarAsistencia(sesion.idSesion)) {
+  if (await confirmarAsistencia(sesion.idCita)) {
     await cargarCitas()
     showModalDetalle.value = false
   }
