@@ -17,7 +17,6 @@ const obtenerRolActual = async () => {
     rolUsuario.value = user.user_metadata.rol || 'estudiante'
   }
 }
-console.log("Mi rol es:", rolUsuario);
 const {
   citasHoy, citasProximas, pacientesEnSala, ocupacionPersonal,
   resumenEstados, totalCitasHoy, loading, fetchDashboard
@@ -51,9 +50,6 @@ const formatFechaCompleta = (iso) => {
         <p v-if="esPaciente">Bienvenido a tu portal de salud.</p>
         <p v-else>Resumen operativo del día en el tópico.</p>
       </div>
-      <button class="btn-secondary" @click="fetchDashboard" :disabled="loading">
-        {{ loading ? 'Cargando...' : '🔄 Actualizar' }}
-      </button>
     </div>
 
     <div v-if="loading" class="data-card">
@@ -126,7 +122,7 @@ const formatFechaCompleta = (iso) => {
         </div>
 
         <div class="data-card">
-          <h3>👥 Sala de Espera / Triaje</h3>
+          <h3>Sala de Espera / Triaje</h3>
           <p class="subtitulo-card">Pacientes que ya llegaron y esperan atención.</p>
 
           <div v-if="pacientesEnSala.length === 0" class="empty-row">

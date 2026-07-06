@@ -1,405 +1,274 @@
 <script setup>
 /**
- * ModalNuevaCita.vue — v5 CICLOS DE TRATAMIENTO CONTINUOS
- * * MEJORAS:
- * - Implementación de las 3 modalidades del ciclo clínico.
- * - Algoritmo integrado para sugerencia óptima de Paquetes + Sesiones Sueltas.
- * - Capacidad de ajuste manual de combinación para la enfermera.
- * - Soporte para el Escenario B (Recarga de tratamiento existente) mediante props.
- * - Enlace a evaluaciones previas desvinculadas.
- * - Formateo y validación de horarios en zona horaria local (-05:00).
+ * ModalNuevaCita.vue — Sistema Tópico Universitario
+ *
+ * CAMBIOS RESPECTO AL MODAL ANTERIOR:
+ * - Sin modalidades de atención (se elimina esa sección completa)
+ * - Sin lógica de paquetes, saldo, tratamientos ni sesiones múltiples
+ * - Búsqueda de paciente bifurcada por tipo:
+ *     estudiante         → escribe código universitario, BD busca en paciente.codigo_universitario
+ *     docente/admin      → escribe DNI, BD busca en persona.numero_documento via JOIN
+ * - Selector de tipo de usuario antes del campo de búsqueda
+ * - idservicio es obligatorio (mapeado desde servicio_topico)
+ * - Duración del slot viene del servicio seleccionado, no hardcodeada
+ * - motivo_consulta como campo opcional pero expuesto
+ * - dia_semana 1-6 (sin domingo)
  */
 import { ref, computed, watch } from 'vue'
-import { MODALIDADES } from '@/composables/useCitas'
-import { useSearch } from '@/composables/useSearch'
+import { TIPOS_USUARIO } from '@/composables/useCitas'
 import { getTodayISO } from '@/lib/dateUtils'
 
 const props = defineProps({
   isOpen: { type: Boolean, required: true },
   fisios: { type: Array, default: () => [] },
   pacientes: { type: Array, default: () => [] },
-  tarifario: { type: Array, default: () => [] },
   paquetes: { type: Array, default: () => [] },
+  servicios: { type: Array, default: () => [] }, // catálogo de servicio_topico
   loadingAccion: { type: Boolean, default: false },
-  saldoPaciente: { type: [Number, null], default: null },
+  saldoPaciente: { type: Object, default: null },
   obtenerSlots: { type: Function, required: true },
-  onFetchSaldoPaciente: { type: Function, required: true },
-  onFetchEvaluaciones: { type: Function, required: true }, // 👈 Recibe la función
-  tratamientoARecargar: { type: Object, default: null }
+  onBuscarPorCodigo: { type: Function, required: true },
+  onBuscarPorDNI: { type: Function, required: true },
+  onFetchSaldoPaciente: { type: Function, required: false },
+  onFetchEvaluaciones: { type: Function, required: false },
+  tratamientoARecargar: { type: Object, default: null },
 })
 
-const emit = defineEmits(['close', 'submit', 'paciente-changed', 'fisio-changed', 'reset-saldo'])
+const emit = defineEmits(['close', 'submit', 'fisio-changed', 'reset-saldo'])
 
-// ── Estados Principales del Formulario ───────────────────────────────────────
-const idPaciente = ref(null)
+// ── Campos del formulario ────────────────────────────────────────────────────
+const tipoBusqueda = ref(null)     // 'estudiante' | 'docente' | 'administrativo'
+const terminoBusqueda = ref('')       // lo que escribe el usuario en el campo de búsqueda
+const resultadosBusqueda = ref([])
+const buscando = ref(false)
+const pacienteSeleccionado = ref(null) // objeto completo del paciente elegido
+
 const idFisioterapeuta = ref(null)
+const idServicio = ref(null)
 const fecha = ref('')
 const hora = ref('')
-const modalidad = ref(null)
-const observaciones = ref('')
+const motivoConsulta = ref('')
 
-// Configuración matemática del Tratamiento / Masajes
-const sesionesDeseadas = ref(1)
-const inputPaquetes = ref(0)
-const inputSueltas = ref(0)
-const overrideenfermera = ref(false)
-
-// Vinculación con evaluaciones previas
-const vieneDeEvaluacionPrevia = ref(false)
-const idEvaluacionSesion = ref(null)
-const evaluacionesDisponibles = ref([]) // Simulador de carga de evaluaciones huérfanas
-
-// Sesiones opcionales para agendamiento en lote
-const sesionesOpcionales = ref([])
-
-// ── Computeds de Control de Flujo ───────────────────────────────────────────
-const esRecarga = computed(() => !!props.tratamientoARecargar)
-
-const modalidadActual = computed(() => {
-  return MODALIDADES.find(m => m.id === modalidad.value) ?? null
-})
-
+// ── Computed ─────────────────────────────────────────────────────────────────
 const fechaMin = computed(() => getTodayISO())
 
-// El agendamiento de sesiones futuras aplica a Tratamientos y Masajes con cantidad > 1
-const permiteSesionesFuturas = computed(() => {
-  if (modalidad.value === 'evaluacion_inicial') return false
-  return sesionesDeseadas.value > 1
+const labelBusqueda = computed(() => {
+  if (!tipoBusqueda.value) return ''
+  return tipoBusqueda.value === 'estudiante'
+    ? 'Código universitario'
+    : 'Número de DNI'
 })
 
-// ── Algoritmo Dinámico de Combinación Óptima (Catálogo) ──────────────────────
-const paquetesDisponibles = computed(() => props.tarifario.filter(t => t.tipo === 'paquete'))
-const paqueteSeleccionado = ref(null)
-const servicioSuelto = computed(() => {
-  // Si la modalidad es masaje, buscamos el servicio de masajes en el catálogo
-  if (modalidad.value === 'masaje') {
-    return props.tarifario.find(t => t.tipo === 'masaje' || t.nombre.toLowerCase().includes('masaje')) || {}
-  }
-  // Si es un tratamiento normal, buscamos la sesión suelta estándar
-  return props.tarifario.find(t => t.tipo === 'sesion_suelta') || {}
-})
-const precioSesionSuelta = computed(() => servicioSuelto.value.precio || 0)
-const precioMasajeSuelto = computed(() => props.tarifario.find(t => t.tipo === 'masaje')?.precio || 0)
-
-const paqueteSeleccionadoData = computed(() => paquetesDisponibles.value.find(p => p.idServicio === paqueteSeleccionado.value))
-
-// 1. Auto-seleccionar el paquete más grande por defecto SOLO al inicio
-watch(paquetesDisponibles, (val) => {
-  if (val.length > 0 && !paqueteSeleccionado.value) {
-    // Ordenamos de mayor a menor y seleccionamos el primero
-    const ordenados = [...val].sort((a, b) => (a.cantidad_sesiones || 1) - (b.cantidad_sesiones || 1))
-    paqueteSeleccionado.value = ordenados[0].idServicio
-  }
-}, { immediate: true })
-
-// 2. Watcher ÚNICO y estable para el cálculo matemático
-watch([sesionesDeseadas, modalidad, paqueteSeleccionado], ([cant, mod, idPaquete]) => {
-  if (mod === 'masaje') {
-    inputPaquetes.value = 0
-    inputSueltas.value = cant
-    return
-  }
-
-  if (mod === 'tratamiento' && !overrideenfermera.value) {
-    if (!idPaquete || paquetesDisponibles.value.length === 0) {
-      inputPaquetes.value = 0
-      inputSueltas.value = cant
-      return
-    }
-
-    const paqueteActivo = paquetesDisponibles.value.find(p => p.idServicio === idPaquete)
-    const size = paqueteActivo?.cantidad_sesiones || 1
-
-    // Matemática simple respetando el paquete elegido en el select
-    inputPaquetes.value = Math.floor(cant / size)
-    inputSueltas.value = cant % size
-  }
+const placeholderBusqueda = computed(() => {
+  if (!tipoBusqueda.value) return ''
+  return tipoBusqueda.value === 'estudiante'
+    ? 'Ej: 20201234A'
+    : 'Ej: 12345678'
 })
 
-// 3. Recálculo si la enfermera desmarca el checkbox manual
-watch(overrideenfermera, (manual) => {
-  if (!manual && modalidad.value === 'tratamiento' && paqueteSeleccionadoData.value) {
-    const size = paqueteSeleccionadoData.value.cantidad_sesiones || 1
-    inputPaquetes.value = Math.floor(sesionesDeseadas.value / size)
-    inputSueltas.value = sesionesDeseadas.value % size
-  }
+// Duración del servicio seleccionado (para calcular los slots correctamente)
+const duracionServicio = computed(() => {
+  if (!idServicio.value) return 20
+  return props.servicios.find(s => s.idservicio === idServicio.value)?.duracion_estimada_minutos ?? 20
 })
 
-// Cálculo final en tiempo real del Costo Total
-const precioEstimado = computed(() => {
-  const mod = modalidad.value
-  if (!mod || mod === 'evaluacion_inicial') return 0
-  if (mod === 'masaje') return sesionesDeseadas.value * precioMasajeSuelto.value
-
-  if (mod === 'tratamiento') {
-    const precioPaquete = paqueteSeleccionadoData.value?.precio || 0
-    return (inputPaquetes.value * precioPaquete) + (inputSueltas.value * precioSesionSuelta.value)
-  }
-  return 0
-})
-
-
-watch(paqueteSeleccionado, (nuevoIdPaquete) => {
-  if (modalidad.value === 'tratamiento' && !overrideenfermera.value && nuevoIdPaquete) {
-    const paqueteManual = paquetesDisponibles.value.find(p => p.idServicio === nuevoIdPaquete)
-    if (paqueteManual) {
-      const size = paqueteManual.cantidad_sesiones || 1
-      inputPaquetes.value = Math.floor(sesionesDeseadas.value / size)
-      inputSueltas.value = sesionesDeseadas.value % size
-    }
-  }
-})
-
-const maxSesionesAdicionales = computed(() => {
-  if (modalidad.value === 'tratamiento') {
-    // Tanto si es nuevo (1 Eval + 5 Sesiones = 5 cajas) 
-    // como si es recarga (Ocultamos el principal + 5 Sesiones = 5 cajas)
-    return sesionesDeseadas.value || 0;
-  }
-  if (modalidad.value === 'masaje') {
-    return esRecarga.value ? sesionesDeseadas.value : Math.max(0, sesionesDeseadas.value - 1);
-  }
-  return 0;
-})
-
-const puedeAgregarMasSesiones = computed(() => sesionesOpcionales.value.length < maxSesionesAdicionales.value)
-
-watch(maxSesionesAdicionales, (max) => {
-  // 1. Si baja la cantidad, borramos las cajas que sobran
-  if (sesionesOpcionales.value.length > max) {
-    sesionesOpcionales.value = sesionesOpcionales.value.slice(0, max)
-  }
-  // 2. Si sube la cantidad, agregamos las cajas automáticamente
-  else if (sesionesOpcionales.value.length < max) {
-    const faltantes = max - sesionesOpcionales.value.length;
-    for (let i = 0; i < faltantes; i++) {
-      agregarSesionOpcional();
-    }
-  }
-})
-
-// ── Buscadores Inteligentes (useSearch) ─────────────────────────────────────
-const {
-  searchQuery: searchPaciente,
-  filteredItems: pacientesFiltrados
-} = useSearch(computed(() => props.pacientes), (p) => {
-  const nombre = nombrePaciente(p).toLowerCase()
-  const doc = p.Persona?.numero_documento?.toLowerCase() || ''
-  return `${nombre} ${doc}`
-})
-
-const showPacienteList = ref(false)
-
-const {
-  searchQuery: searchFisio,
-  filteredItems: fisiosFiltrados
-} = useSearch(computed(() => props.fisios), (f) => nombreFisio(f).toLowerCase())
-
-const showFisioList = ref(false)
-
-// ── Selección de Entidades ──────────────────────────────────────────────────
-const seleccionarPaciente = async (p) => {
-  idPaciente.value = p.idPaciente
-  searchPaciente.value = nombrePaciente(p)
-  showPacienteList.value = false
-  emit('reset-saldo')
-
-  // Cargamos el saldo
-  await props.onFetchSaldoPaciente(p.idPaciente)
-
-  // ✅ REEMPLAZO DEL SIMULADOR: Llamamos a la BD real
-  const evaluacionesRaw = await props.onFetchEvaluaciones(p.idPaciente)
-
-  // Formateamos para que el <select> se vea bonito (Ej: "Lun 15 Jun, 08:00 AM")
-  evaluacionesDisponibles.value = evaluacionesRaw.map(ev => {
-    const fechaFormateada = new Intl.DateTimeFormat('es-PE', {
-      weekday: 'short', day: '2-digit', month: 'short',
-      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Lima'
-    }).format(new Date(ev.fecha_hora))
-
-    return {
-      idSesion: ev.idSesion,
-      label: `${fechaFormateada} — ${ev.observaciones || 'Sin observaciones'}`
-    }
-  })
-}
-
-const seleccionarFisio = (f) => {
-  idFisioterapeuta.value = f.idFisioterapeuta
-  searchFisio.value = nombreFisio(f)
-  showFisioList.value = false
-}
-
-// ── Control de Slots de Horarios ────────────────────────────────────────────
+// ── Slots disponibles ────────────────────────────────────────────────────────
 const slotsDisponibles = ref([])
 const loadingSlots = ref(false)
 
+// Filtra slots pasados si la fecha es hoy
 const slotsFiltrados = computed(() => {
-  if (loadingSlots.value) return []
+  if (loadingSlots.value || !slotsDisponibles.value.length) return slotsDisponibles.value
 
-  // 1. Obtenemos "hoy" estrictamente en hora de Perú (YYYY-MM-DD)
-  const fechaHoy = getTodayISO()
+  const hoy = getTodayISO()
+  if (fecha.value !== hoy) return slotsDisponibles.value
 
-  // 2. Si el día elegido NO es hoy (ej. es mañana), devolvemos todos los horarios libres
-  if (fecha.value !== fechaHoy) {
-    return slotsDisponibles.value
-  }
-
-  // 3. Si el día elegido SÍ es hoy, ocultamos las horas que ya pasaron
-  const ahoraPeru = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Lima" }));
-  const horaActual = ahoraPeru.getHours()
-  const minActual = ahoraPeru.getMinutes()
+  const ahora = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Lima' }))
+  const hh = ahora.getHours()
+  const mm = ahora.getMinutes()
 
   return slotsDisponibles.value.filter(slot => {
     const [h, m] = slot.split(':').map(Number)
-    return h > horaActual || (h === horaActual && m > minActual)
+    return h > hh || (h === hh && m > mm)
   })
 })
 
-watch([idFisioterapeuta, fecha, modalidad], async ([idFisio, f, mod]) => {
-  if (!idFisio || !f || !mod) {
+// Recarga slots cuando cambia el fisio, la fecha o el servicio
+watch([idFisioterapeuta, fecha, idServicio], async ([fisio, f, serv]) => {
+  slotsDisponibles.value = []
+  hora.value = ''
+  if (!fisio || !f || !serv) return
+
+  // Verificar que no sea domingo (JS: 0=Dom)
+  const [y, m, d] = f.split('-')
+  const diaSemana = new Date(Number(y), Number(m) - 1, Number(d)).getDay()
+  if (diaSemana === 0) {
     slotsDisponibles.value = []
-    hora.value = ''
     return
   }
+
   loadingSlots.value = true
   try {
-    const duracion = mod === 'masaje' ? 60 : 20
-    slotsDisponibles.value = await props.obtenerSlots(idFisio, f, duracion)
-  } catch (error) {
-    slotsDisponibles.value = []
+    slotsDisponibles.value = await props.obtenerSlots(fisio, f, duracionServicio.value)
   } finally {
-    if (!slotsDisponibles.value.includes(hora.value)) hora.value = ''
     loadingSlots.value = false
   }
 })
 
-// ── Agendamiento en Lote (Sesiones Opcionales) ──────────────────────────────
-const agregarSesionOpcional = () => {
-  sesionesOpcionales.value.push({ fecha: '', hora: '', slots: [], loading: false })
+// ── Búsqueda dinámica ────────────────────────────────────────────────────────
+// Timer de debounce para no disparar una query por cada tecla
+let timerBusqueda = null
+
+const onInputBusqueda = (valor) => {
+  terminoBusqueda.value = valor
+  pacienteSeleccionado.value = null
+  resultadosBusqueda.value = []
+
+  clearTimeout(timerBusqueda)
+  if (!valor || valor.length < 3) return
+
+  timerBusqueda = setTimeout(async () => {
+    buscando.value = true
+    try {
+      if (tipoBusqueda.value === 'estudiante') {
+        resultadosBusqueda.value = await props.onBuscarPorCodigo(valor)
+      } else {
+        resultadosBusqueda.value = await props.onBuscarPorDNI(valor, tipoBusqueda.value)
+      }
+    } finally {
+      buscando.value = false
+    }
+  }, 350) // 350ms de debounce: balance entre responsividad y carga al servidor
 }
 
-const buscarSlotsParaOpcional = async (index) => {
-  const s = sesionesOpcionales.value[index]
-  if (!s.fecha || !idFisioterapeuta.value) return
+// Al cambiar el tipo, resetea el campo de búsqueda para no mezclar datos
+watch(tipoBusqueda, () => {
+  terminoBusqueda.value = ''
+  resultadosBusqueda.value = []
+  pacienteSeleccionado.value = null
+})
 
-  s.loading = true
-  s.hora = ''
-  try {
-    const horarios = await props.obtenerSlots(idFisioterapeuta.value, s.fecha, 60)
-    s.slots = horarios
-  } catch (e) {
-    s.slots = []
-  } finally {
-    s.loading = false
-  }
+const seleccionarPaciente = (p) => {
+  pacienteSeleccionado.value = p
+  resultadosBusqueda.value = []
+  // Muestra en el input el nombre del paciente una vez seleccionado
+  const nombre = `${p.persona?.nombres ?? ''} ${p.persona?.apellidos ?? ''}`.trim()
+  terminoBusqueda.value = nombre
 }
 
-// ── Control de Apertura y Reseteo ───────────────────────────────────────────
+const limpiarPaciente = () => {
+  pacienteSeleccionado.value = null
+  terminoBusqueda.value = ''
+  resultadosBusqueda.value = []
+}
+
+// ── Reseteo del formulario ───────────────────────────────────────────────────
 watch(() => props.isOpen, (abierto) => {
   if (abierto) resetForm()
 })
 
 const resetForm = () => {
-  if (props.tratamientoARecargar) {
-    modalidad.value = 'tratamiento'
-    sesionesDeseadas.value = 1
-    overrideenfermera.value = false
-
-    idPaciente.value = props.tratamientoARecargar.idPaciente
-    searchPaciente.value = props.tratamientoARecargar.nombrePaciente
-    idFisioterapeuta.value = props.tratamientoARecargar.idFisioterapeuta || null
-    searchFisio.value = props.tratamientoARecargar.nombreFisio || ''
-
-    // 👇 NUEVA LÓGICA DE DETECCIÓN 👇
-    if (props.tratamientoARecargar.idTratamiento) {
-      // Es una recarga normal (ya existe el tratamiento)
-      vieneDeEvaluacionPrevia.value = false;
-      idEvaluacionSesion.value = null;
-    } else if (props.tratamientoARecargar.idEvaluacionSesion) {
-      // Es la compra de un paquete anclado a la evaluación que acabas de clickear
-      vieneDeEvaluacionPrevia.value = true;
-      idEvaluacionSesion.value = props.tratamientoARecargar.idEvaluacionSesion;
-      // Para que el select oculto no se rompa, le inyectamos una opción ficticia
-      evaluacionesDisponibles.value = [{
-        idSesion: props.tratamientoARecargar.idEvaluacionSesion,
-        label: 'Evaluación Seleccionada (' + props.tratamientoARecargar.nombrePaciente + ')'
-      }];
-    }
-  } else {
-    idPaciente.value = null
-    searchPaciente.value = ''
-    idFisioterapeuta.value = null
-    searchFisio.value = ''
-    modalidad.value = null
-    sesionesDeseadas.value = 1
-    overrideenfermera.value = false
-    vieneDeEvaluacionPrevia.value = false
-    idEvaluacionSesion.value = null
-  }
+  tipoBusqueda.value = null
+  terminoBusqueda.value = ''
+  resultadosBusqueda.value = []
+  pacienteSeleccionado.value = null
+  idFisioterapeuta.value = null
+  idServicio.value = null
   fecha.value = ''
   hora.value = ''
-  observaciones.value = ''
+  motivoConsulta.value = ''
   slotsDisponibles.value = []
-  sesionesOpcionales.value = []
 }
 
-// ── Envío del Formulario ────────────────────────────────────────────────────
+// ── Envío ────────────────────────────────────────────────────────────────────
 const handleSubmit = () => {
-  let principalFecha = fecha.value
-  let principalHora = hora.value
-  let extraFechas = [...sesionesOpcionales.value]
-
-  // 👇 EL TRUCO: Si es recarga (selector principal oculto), tomamos la 1° fecha de la lista
-  if (esRecarga.value && extraFechas.length > 0) {
-    const primera = extraFechas.shift() // Saca la primera de la lista opcional
-    principalFecha = primera.fecha
-    principalHora = primera.hora
+  if (!pacienteSeleccionado.value) {
+    return // el botón ya está disabled, pero como seguro extra
   }
 
-  const sesionesExtraFormateadas = extraFechas
-    .filter(s => s.fecha && s.hora)
-    .map(s => `${s.fecha}T${s.hora}:00-05:00`)
-
-  const payload = {
-    idPaciente: idPaciente.value,
-    idFisioterapeuta: idFisioterapeuta.value,
-    fecha_hora: principalFecha && principalHora ? `${principalFecha}T${principalHora}:00-05:00` : null,
-    modalidad: modalidad.value,
-    observaciones: observaciones.value,
-    sesionesOpcionales: sesionesExtraFormateadas,
-    idTratamientoExistente: props.tratamientoARecargar?.idTratamiento || null,
-    vieneDeEvaluacionPrevia: vieneDeEvaluacionPrevia.value,
-    idEvaluacionSesion: vieneDeEvaluacionPrevia.value ? idEvaluacionSesion.value : null,
-
-    // 👇 AQUÍ ESTÁ LA CORRECCIÓN 👇
-    tratamientoConfig: {
-      sesionesDeseadas: sesionesDeseadas.value,
-      paquetes: inputPaquetes.value,
-      sueltas: inputSueltas.value,
-      costoTotal: precioEstimado.value,
-      tamanoPaquete: paqueteSeleccionadoData.value?.cantidad_sesiones || 1,
-
-      // Datos explícitos para que el composable cree el "Paquete" sin errores
-      idServicioPaquete: paqueteSeleccionadoData.value?.idServicio || null,
-      nombrePaquete: paqueteSeleccionadoData.value?.nombre || 'Paquete Clínico',
-      precioPaquete: paqueteSeleccionadoData.value?.precio || 0,
-
-      // Datos explícitos para las "Sesiones Sueltas"
-      idServicioSuelta: servicioSuelto.value.idServicio || null,
-      nombreSuelta: servicioSuelto.value.nombre || 'Sesión Suelta',
-      precioSuelta: servicioSuelto.value.precio || 0
-    }
-  }
-
-  emit('submit', payload)
+  emit('submit', {
+    idpaciente: pacienteSeleccionado.value.idpaciente,
+    idfisioterapeuta: idFisioterapeuta.value,
+    idservicio: idServicio.value,
+    fecha_hora: `${fecha.value}T${hora.value}:00-05:00`,
+    motivo_consulta: motivoConsulta.value || null,
+  })
 }
 
-const hidePacienteDelay = () => setTimeout(() => { showPacienteList.value = false }, 200)
-const hideFisioDelay = () => setTimeout(() => { showFisioList.value = false }, 200)
+// ── Helpers de display ───────────────────────────────────────────────────────
+const nombreFisio = (f) => {
+  if (!f) return ''
+  const persona = f.persona ?? f.Persona ?? {}
+  const nombres = persona?.nombres ?? ''
+  const apellidos = persona?.apellidos ?? ''
+  const especialidad = f.especialidad ?? f.fisio_especialidad ?? ''
+  return `${nombres} ${apellidos}`.trim() + (especialidad ? ` — ${especialidad}` : '')
+}
 
-const nombreFisio = (f) => `${f.Persona?.nombres ?? ''} ${f.Persona?.apellidos ?? ''} — ${f.especialidad}`.trim()
-const nombrePaciente = (p) => `${p.Persona?.nombres ?? ''} ${p.Persona?.apellidos ?? ''}`.trim()
+const labelTipoBusqueda = (id) =>
+  TIPOS_USUARIO.find(t => t.id === id)?.label ?? id
+
+// Texto del label de resultado en la lista desplegable
+const labelResultado = (p) => {
+  const nombre = `${p.persona?.nombres ?? ''} ${p.persona?.apellidos ?? ''}`.trim()
+  if (tipoBusqueda.value === 'estudiante') {
+    return { principal: nombre, secundario: `Cód: ${p.codigo_universitario} · ${p.facultad_escuela}` }
+  }
+  return { principal: nombre, secundario: `DNI: ${p.persona?.numero_documento} · ${p.facultad_escuela}` }
+}
+
+// Determina si el día seleccionado es domingo (bloqueado)
+const esDomingo = computed(() => {
+  if (!fecha.value) return false
+  const [y, m, d] = fecha.value.split('-')
+  return new Date(Number(y), Number(m) - 1, Number(d)).getDay() === 0
+})
+
+// ── Validación del botón de envío ────────────────────────────────────────────
+const formularioValido = computed(() =>
+  !!pacienteSeleccionado.value &&
+  !!idFisioterapeuta.value &&
+  !!idServicio.value &&
+  !!fecha.value &&
+  !!hora.value &&
+  !esDomingo.value
+)
+
+// Cuando cambia el fisioterapeuta seleccionado, avisamos al padre
+watch(idFisioterapeuta, (val) => {
+  if (val) emit('fisio-changed', val)
+})
+
+// Cuando cambia el paciente seleccionado, pedimos saldo y avisamos para resetear saldo si quedó nulo
+watch(pacienteSeleccionado, (p) => {
+  if (!p) {
+    emit('reset-saldo')
+    return
+  }
+
+  const id = p.idpaciente ?? p.idPaciente ?? p.id
+  if (props.onFetchSaldoPaciente && id) {
+    try { props.onFetchSaldoPaciente(id) } catch (e) { /* noop */ }
+  }
+  if (props.onFetchEvaluaciones && id) {
+    try { props.onFetchEvaluaciones(id) } catch (e) { /* noop */ }
+  }
+})
+
+// Si el padre pre-configura `tratamientoARecargar`, aplicamos selección inicial
+watch(() => props.tratamientoARecargar, (t) => {
+  if (!t) return
+  // puede venir con idPaciente / idpaciente y nombres
+  if (t.idPaciente || t.idpaciente) {
+    pacienteSeleccionado.value = { idpaciente: t.idPaciente ?? t.idpaciente, persona: { nombres: t.nombrePaciente ?? '', apellidos: '' } }
+  }
+  if (t.idFisioterapeuta || t.idFisioterapeuta === 0 || t.idfisioterapeuta) {
+    idFisioterapeuta.value = t.idFisioterapeuta ?? t.idfisioterapeuta
+  }
+  // solicitar saldo si corresponde
+  const id = t.idPaciente ?? t.idpaciente
+  if (id && props.onFetchSaldoPaciente) props.onFetchSaldoPaciente(id)
+})
 </script>
 
 <template>
@@ -408,227 +277,163 @@ const nombrePaciente = (p) => `${p.Persona?.nombres ?? ''} ${p.Persona?.apellido
       <div class="modal-window modal-cita">
 
         <div class="modal-header">
-          <h3>{{ esRecarga ? 'Agregar Sesiones al Tratamiento' : 'Registrar Nueva Cita / Ciclo' }}</h3>
+          <h3>Registrar Nueva Cita</h3>
           <button class="close-x" @click="emit('close')" :disabled="loadingAccion">&times;</button>
         </div>
 
         <form @submit.prevent="handleSubmit" class="modal-form" novalidate>
 
+          <!-- ── Sección 1: Paciente ─────────────────────────────────────── -->
           <div class="form-section">
-            <p class="section-label">1. Participantes</p>
-            <div class="form-grid">
+            <p class="section-label">1. Paciente</p>
 
-              <div class="input-group" style="position: relative;">
-                <label>Paciente <span class="req">*</span></label>
+            <!-- Paso 1-A: Tipo de usuario -->
+            <div class="input-group">
+              <label>Tipo de usuario <span class="req">*</span></label>
+              <div class="tipo-usuario-grid">
+                <button v-for="tipo in TIPOS_USUARIO" :key="tipo.id" type="button" class="tipo-btn"
+                  :class="{ active: tipoBusqueda === tipo.id }" @click="tipoBusqueda = tipo.id">
+                  {{ tipo.label }}
+                </button>
+              </div>
+            </div>
 
-                <input v-if="esRecarga" type="text" :value="tratamientoARecargar.nombrePaciente" disabled
-                  class="search-input is-selected"
-                  style="background-color: #f1f5f9; font-weight: bold; color: #334155; cursor: not-allowed;" />
+            <!-- Paso 1-B: Campo de búsqueda (aparece cuando hay tipo seleccionado) -->
+            <Transition name="slide-input">
+              <div v-if="tipoBusqueda" class="input-group" style="position: relative;">
+                <label>{{ labelBusqueda }} <span class="req">*</span></label>
 
-                <input v-else type="text" v-model="searchPaciente" @focus="showPacienteList = true"
-                  @blur="hidePacienteDelay" placeholder="🔍 Buscar por nombre o DNI..." required class="search-input"
-                  :class="{ 'is-selected': idPaciente }" />
-
-                <span v-if="idPaciente" class="valid-check">✅</span>
-
-                <div v-if="idPaciente && !esRecarga" class="field-hint" style="margin-top: 5px;">
-                  <span>Saldo actual disponible: </span>
-                  <strong :class="saldoPaciente > 0 ? 'text-green' : 'text-red'">
-                    {{ saldoPaciente }} sesiones
-                  </strong>
+                <!-- Si ya hay paciente seleccionado, mostramos chip y botón de limpiar -->
+                <div v-if="pacienteSeleccionado" class="paciente-chip">
+                  <div class="chip-info">
+                    <span class="chip-nombre">
+                      {{ pacienteSeleccionado.persona?.nombres }} {{ pacienteSeleccionado.persona?.apellidos }}
+                    </span>
+                    <span class="chip-detalle">
+                      {{ labelTipoBusqueda(tipoBusqueda) }}
+                      ·
+                      {{ tipoBusqueda === 'estudiante'
+                        ? pacienteSeleccionado.codigo_universitario
+                        : pacienteSeleccionado.persona?.numero_documento }}
+                      · {{ pacienteSeleccionado.facultad_escuela }}
+                    </span>
+                  </div>
+                  <button type="button" class="chip-clear" @click="limpiarPaciente" title="Cambiar paciente">
+                    &times;
+                  </button>
                 </div>
 
-                <ul v-if="showPacienteList && pacientesFiltrados.length > 0 && !esRecarga" class="options-list">
-                  <li v-for="p in pacientesFiltrados" :key="p.idPaciente" @click="seleccionarPaciente(p)">
-                    <div class="li-name">{{ p.Persona?.nombres }} {{ p.Persona?.apellidos }}</div>
-                    <div class="li-sub">Doc: {{ p.Persona?.numero_documento || 'S/N' }}</div>
-                  </li>
-                </ul>
+                <!-- Campo de búsqueda activo cuando no hay paciente seleccionado -->
+                <template v-else>
+                  <input type="text" class="search-input" :placeholder="placeholderBusqueda" :value="terminoBusqueda"
+                    @input="onInputBusqueda($event.target.value)" autocomplete="off" />
+                  <span v-if="buscando" class="search-spinner">⏳</span>
+                  <p v-if="terminoBusqueda.length > 0 && terminoBusqueda.length < 3" class="field-hint">
+                    Escribe al menos 3 caracteres para buscar.
+                  </p>
+
+                  <!-- Dropdown de resultados -->
+                  <ul v-if="resultadosBusqueda.length > 0" class="options-list">
+                    <li v-for="p in resultadosBusqueda" :key="p.idpaciente" @click="seleccionarPaciente(p)">
+                      <div class="li-name">{{ labelResultado(p).principal }}</div>
+                      <div class="li-sub">{{ labelResultado(p).secundario }}</div>
+                    </li>
+                  </ul>
+
+                  <p v-else-if="!buscando && terminoBusqueda.length >= 3 && resultadosBusqueda.length === 0"
+                    class="field-hint warn">
+                    No se encontró ningún paciente con ese {{ labelBusqueda.toLowerCase() }}.
+                  </p>
+                </template>
               </div>
-
-              <div class="input-group" style="position: relative;">
-                <label>Fisioterapeuta Asignado <span class="req">*</span></label>
-                <input type="text" v-model="searchFisio" @focus="showFisioList = true" @blur="hideFisioDelay"
-                  placeholder="🔍 Buscar especialista..." required class="search-input"
-                  :class="{ 'is-selected': idFisioterapeuta }" />
-                <span v-if="idFisioterapeuta" class="valid-check">✅</span>
-
-                <ul v-if="showFisioList && fisiosFiltrados.length > 0" class="options-list">
-                  <li v-for="f in fisiosFiltrados" :key="f.idFisioterapeuta" @click="seleccionarFisio(f)">
-                    <div class="li-name">{{ f.Persona?.nombres }} {{ f.Persona?.apellidos }}</div>
-                    <div class="li-sub">{{ f.especialidad }}</div>
-                  </li>
-                </ul>
-              </div>
-
-            </div>
+            </Transition>
           </div>
 
-          <div v-if="!esRecarga" class="form-section">
-            <p class="section-label">2. Modalidad de atención <span class="req">*</span></p>
-            <div class="modalidad-grid">
-              <button v-for="m in MODALIDADES" :key="m.id" type="button" class="modalidad-card"
-                :class="{ selected: modalidad === m.id }" :style="modalidad === m.id ? `--card-color: ${m.color}` : ''"
-                @click="modalidad = m.id">
-                <span class="modalidad-icono">{{ m.icono }}</span>
-                <span class="modalidad-nombre">{{ m.label }}</span>
-                <span class="modalidad-desc">{{ m.descripcion }}</span>
-              </button>
-            </div>
-          </div>
-
-          <Transition name="slide-input">
-            <div v-if="['tratamiento', 'masaje'].includes(modalidad)" class="form-section"
-              style="background: #f8fafc; padding: 15px; border-radius: 8px;">
-              <p class="section-label" style="color: #0f766e;">{{ esRecarga ? '2.' : '3.' }} Configuración de Compra</p>
-
-              <div class="form-grid" style="margin-top: 5px;">
-                <div class="input-group">
-                  <label>¿Cuántas sesiones nuevas agregará?</label>
-                  <input type="number" v-model.number="sesionesDeseadas" min="1" max="50" required />
-                </div>
-
-                <div v-if="modalidad === 'tratamiento'" class="input-group">
-                  <label>Tarifa a aplicar</label>
-                  <select v-model="paqueteSeleccionado" @change="overrideenfermera = false" required>
-                    <option v-for="p in paquetesDisponibles" :key="p.idServicio" :value="p.idServicio">
-                      {{ p.nombre }} ({{ p.cantidad_sesiones }} ses.) — S/ {{ p.precio }}
-                    </option>
-                  </select>
-                </div>
-              </div>
-
-              <div v-if="modalidad === 'tratamiento'" class="form-grid" style="margin-top: 10px;">
-                <div class="input-group span-2">
-                  <label>Desglose Tarifario Automático</label>
-                  <div class="preview-calculo"
-                    style="padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; font-size: 12.5px;">
-                    <div>📦 Paquete "{{ paqueteSeleccionadoData?.nombre || 'Base' }}" ({{
-                      paqueteSeleccionadoData?.cantidad_sesiones || 1 }} ses.): <strong>{{ inputPaquetes }}</strong> (S/
-                      {{
-                        (inputPaquetes * (paqueteSeleccionadoData?.precio || 0)).toFixed(2) }})</div>
-                    <div>💆 Sesiones sueltas: <strong>{{ inputSueltas }}</strong> (S/ {{ (inputSueltas *
-                      precioSesionSuelta).toFixed(2) }})</div>
-                  </div>
-                  <div style="margin-top: 5px;">
-                    <input type="checkbox" id="chkManual" v-model="overrideenfermera" />
-                    <label for="chkManual"
-                      style="font-size: 11.5px; margin-left: 5px; cursor: pointer; color: #475569;">Ajustar
-                      combinación manualmente</label>
-                  </div>
-                </div>
-              </div>
-
-              <div v-if="overrideenfermera && modalidad === 'tratamiento'" class="form-grid style-manual"
-                style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #cbd5e1;">
-                <div class="input-group">
-                  <label>Modificar Paquetes</label>
-                  <input type="number" v-model.number="inputPaquetes" min="0" />
-                </div>
-                <div class="input-group">
-                  <label>Modificar Sueltas</label>
-                  <input type="number" v-model.number="inputSueltas" min="0" />
-                </div>
-              </div>
-            </div>
-          </Transition>
-
-          <div v-if="modalidad && !esRecarga" class="form-section">
-            <p class="section-label">
-              {{ modalidad === 'evaluacion_inicial' ? '3.' : '4.' }} Fecha y Horario (Evaluación Inicial)
-            </p>
+          <!-- ── Sección 2: Servicio y Fisioterapeuta ───────────────────── -->
+          <div class="form-section">
+            <p class="section-label">2. Servicio y especialista</p>
             <div class="form-grid">
+
               <div class="input-group">
-                <label>Fecha <span class="req">*</span></label>
-                <input type="date" v-model="fecha" :min="fechaMin" required />
-              </div>
-              <div class="input-group">
-                <label>Horario disponible <span class="req">*</span></label>
-                <select v-model="hora" required :disabled="!fecha || !idFisioterapeuta || loadingSlots">
-                  <option value="" disabled>
-                    {{ loadingSlots ? 'Buscando huecos libres...' : (!idFisioterapeuta ? '⚠️ Falta Especialista' : (!fecha ? '⚠️ Falta Fecha' : (slotsFiltrados.length === 0 ? '❌ No hay turnos ese día' : '— Seleccione hora —'))) }}
+                <label>Servicio <span class="req">*</span></label>
+                <select v-model="idServicio" required>
+                  <option :value="null" disabled>— Seleccionar servicio —</option>
+                  <option v-for="s in servicios" :key="s.idservicio" :value="s.idservicio">
+                    {{ s.nombre_servicio }}
+                    ({{ s.duracion_estimada_minutos }} min)
                   </option>
-                  <option v-for="slot in slotsFiltrados" :key="slot" :value="slot">{{ slot }}</option>
                 </select>
               </div>
 
-              <div class="input-group span-2">
-                <label>Observaciones Clínicas / Administrativas</label>
-                <input type="text" v-model="observaciones" placeholder="Ej: Pago pendiente parcial..."
-                  maxlength="200" />
+              <div class="input-group">
+                <label>Fisioterapeuta <span class="req">*</span></label>
+                <select v-model="idFisioterapeuta" required>
+                  <option :value="null" disabled>— Seleccionar especialista —</option>
+                  <option v-for="f in fisios" :key="f.idFisioterapeuta ?? f.idfisioterapeuta"
+                    :value="f.idFisioterapeuta ?? f.idfisioterapeuta">
+                    {{ nombreFisio(f) }}
+                  </option>
+                </select>
               </div>
+
             </div>
           </div>
 
-          <Transition name="slide-input">
-            <div v-if="permiteSesionesFuturas" class="form-section"
-              style="background: #f0f9ff; padding: 15px; border-radius: 8px; border-left: 4px solid #0284c7; margin-top: 15px;">
+          <!-- ── Sección 3: Fecha y horario ─────────────────────────────── -->
+          <div class="form-section">
+            <p class="section-label">3. Fecha y horario</p>
+            <div class="form-grid">
 
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <p class="section-label" style="margin: 0; color: #0369a1;">
-                  📅 Agendar las siguientes sesiones (Opcional)
+              <div class="input-group">
+                <label>Fecha <span class="req">*</span></label>
+                <input type="date" v-model="fecha" :min="fechaMin" required />
+                <p v-if="esDomingo" class="field-hint warn">
+                  ⚠️ El tópico no atiende los domingos. Selecciona otro día.
                 </p>
-                <span
-                  style="font-size: 12px; font-weight: bold; color: #0284c7; background: #e0f2fe; padding: 2px 8px; border-radius: 12px;">
-                  {{ sesionesOpcionales.length }} de {{ maxSesionesAdicionales }}
-                </span>
               </div>
 
-              <p style="font-size: 12px; color: #475569; margin-bottom: 15px; line-height: 1.4;">
-                Puedes agendar las fechas restantes ahora mismo, o dejarlas como "Saldo" para que el paciente las
-                programe después.
-              </p>
-
-              <div v-for="(sesionExtra, index) in sesionesOpcionales" :key="index" class="form-grid"
-                style="margin-bottom: 12px; align-items: end; background: white; padding: 10px; border-radius: 6px; border: 1px solid #bae6fd;">
-
-                <div class="input-group">
-                  <label style="color: #0284c7; font-weight: bold;">Sesión #{{ index + 1 }}</label>
-                  <input type="date" v-model="sesionExtra.fecha" :min="fechaMin"
-                    @change="buscarSlotsParaOpcional(index)" required />
-                </div>
-
-                <div class="input-group">
-                  <label>Hora</label>
-                  <select v-model="sesionExtra.hora" required :disabled="!sesionExtra.fecha || sesionExtra.loading">
-                    <option value="" disabled>
-                      {{ sesionExtra.loading ? 'Buscando...' : (sesionExtra.slots?.length ? '— Seleccionar —' : 'Sin turnos') }}
-                    </option>
-                    <option v-for="slot in sesionExtra.slots" :key="slot" :value="slot">{{ slot }}</option>
-                  </select>
-                </div>
-
-                <button type="button" @click="sesionesOpcionales.splice(index, 1)"
-                  style="height: 40px; padding: 0 15px; background: #fee2e2; color: #ef4444; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;"
-                  title="Quitar sesión">
-                  🗑️
-                </button>
+              <div class="input-group">
+                <label>Horario disponible <span class="req">*</span></label>
+                <select v-model="hora" required
+                  :disabled="!fecha || !idFisioterapeuta || !idServicio || loadingSlots || esDomingo">
+                  <option value="" disabled>
+                    {{
+                      loadingSlots ? 'Buscando turnos libres...' :
+                        esDomingo ? '❌ Día no disponible' :
+                          !idFisioterapeuta ? '⚠️ Selecciona un especialista primero' :
+                            !idServicio ? '⚠️ Selecciona un servicio primero' :
+                              !fecha ? '⚠️ Selecciona una fecha primero' :
+                                slotsFiltrados.length === 0 ? '❌ Sin turnos disponibles ese día' :
+                                  '— Seleccionar hora —'
+                    }}
+                  </option>
+                  <option v-for="slot in slotsFiltrados" :key="slot" :value="slot">
+                    {{ slot }}
+                  </option>
+                </select>
               </div>
 
-              <button v-if="puedeAgregarMasSesiones" type="button" @click="agregarSesionOpcional"
-                style="width: 100%; padding: 10px; background: transparent; border: 1px dashed #0284c7; color: #0284c7; border-radius: 6px; cursor: pointer; font-weight: 600; margin-top: 5px; transition: background 0.2s;">
-                ➕ Añadir otra fecha al calendario
-              </button>
-            </div>
-          </Transition>
-
-          <div v-if="modalidad" class="resumen-box" :style="`border-color: ${modalidadActual?.color || '#cbd5e1'}`">
-            <span class="resumen-icono">{{ modalidadActual?.icono || '💰' }}</span>
-            <div style="width: 100%;">
-              <strong>Monto Total de Operación Administrativa</strong>
-              <div class="precio-badge" style="margin-top: 10px; font-size: 15px; padding: 6px 12px;">
-                Total a Pagar en Caja: <strong>S/ {{ Number(precioEstimado).toFixed(2) }}</strong>
-              </div>
             </div>
           </div>
 
+          <!-- ── Sección 4: Motivo (opcional) ───────────────────────────── -->
+          <div class="form-section">
+            <p class="section-label">4. Motivo de consulta (opcional)</p>
+            <div class="input-group">
+              <textarea v-model="motivoConsulta" rows="2" placeholder="Describe brevemente el motivo de la visita..."
+                maxlength="300"></textarea>
+              <span class="char-count">{{ motivoConsulta.length }}/300</span>
+            </div>
+          </div>
+
+          <!-- ── Acciones ───────────────────────────────────────────────── -->
           <div class="modal-actions">
-            <button type="button" class="btn-secondary" @click="emit('close')"
-              :disabled="loadingAccion">Cancelar</button>
-            <button type="submit" class="btn-primary-submit"
-              :disabled="loadingAccion || !idPaciente || !idFisioterapeuta || (!esRecarga && !fecha) || (esRecarga && !sesionesOpcionales[0]?.fecha)">
+            <button type="button" class="btn-secondary" @click="emit('close')" :disabled="loadingAccion">
+              Cancelar
+            </button>
+            <button type="submit" class="btn-primary-submit" :disabled="loadingAccion || !formularioValido">
               <span v-if="loadingAccion" class="btn-spinner"></span>
-              <span v-else>{{ esRecarga ? 'Confirmar Compra y Agendar' : 'Registrar Operación' }}</span>
+              <span v-else>Registrar Cita</span>
             </button>
           </div>
 
@@ -640,30 +445,19 @@ const nombrePaciente = (p) => `${p.Persona?.nombres ?? ''} ${p.Persona?.apellido
 
 <style scoped>
 .modal-cita {
-  max-width: 640px;
+  max-width: 580px;
 }
 
 .form-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   padding-bottom: 18px;
   border-bottom: 1px solid var(--gray-100);
 }
 
 .form-section:last-of-type {
   border-bottom: none;
-}
-
-.precio-badge {
-  margin-top: 8px;
-  padding: 4px 8px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  color: #166534;
-  display: inline-block;
-  border-radius: 4px;
-  font-size: 13px;
 }
 
 .section-label {
@@ -679,26 +473,99 @@ const nombrePaciente = (p) => `${p.Persona?.nombres ?? ''} ${p.Persona?.apellido
   color: #ef4444;
 }
 
+/* Selector de tipo de usuario */
+.tipo-usuario-grid {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tipo-btn {
+  flex: 1;
+  min-width: 120px;
+  padding: 9px 14px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--gray-200);
+  background: var(--gray-50);
+  color: var(--gray-500);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+  text-align: center;
+}
+
+.tipo-btn:hover {
+  border-color: var(--blue);
+  color: var(--navy);
+}
+
+.tipo-btn.active {
+  border-color: var(--navy);
+  background: color-mix(in srgb, var(--navy) 8%, white);
+  color: var(--navy);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--navy) 12%, transparent);
+}
+
+/* Campo de búsqueda con spinner */
 .search-input {
   width: 100%;
-  padding-right: 30px !important;
+  box-sizing: border-box;
 }
 
-.search-input.is-selected {
-  background-color: #f0fdf4 !important;
-  border-color: #10b981 !important;
-  color: #065f46;
-  font-weight: 600;
-}
-
-.valid-check {
+.search-spinner {
   position: absolute;
   right: 10px;
-  top: 28px;
+  top: 50%;
+  transform: translateY(-50%);
   font-size: 14px;
-  pointer-events: none;
 }
 
+/* Chip de paciente seleccionado */
+.paciente-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--blue);
+  background: color-mix(in srgb, var(--blue) 8%, white);
+}
+
+.chip-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chip-nombre {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.chip-detalle {
+  font-size: 11.5px;
+  color: var(--gray-500);
+}
+
+.chip-clear {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: var(--gray-400);
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.chip-clear:hover {
+  color: #ef4444;
+}
+
+/* Dropdown de resultados */
 .options-list {
   position: absolute;
   top: 100%;
@@ -706,29 +573,28 @@ const nombrePaciente = (p) => `${p.Persona?.nombres ?? ''} ${p.Persona?.apellido
   right: 0;
   background: white;
   border: 1px solid var(--gray-200);
-  border-radius: var(--radius-sm);
-  max-height: 180px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  max-height: 220px;
   overflow-y: auto;
-  z-index: 50;
-  margin: 4px 0 0 0;
-  padding: 0;
+  margin: 0;
+  padding: 4px 0;
   list-style: none;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 .options-list li {
-  padding: 10px 12px;
+  padding: 10px 14px;
   cursor: pointer;
-  border-bottom: 1px solid var(--gray-50);
-  transition: background 0.2s;
+  transition: background 0.15s;
 }
 
 .options-list li:hover {
-  background: #f0f7ff;
+  background: var(--gray-50);
 }
 
 .li-name {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--navy);
 }
@@ -736,115 +602,43 @@ const nombrePaciente = (p) => `${p.Persona?.nombres ?? ''} ${p.Persona?.apellido
 .li-sub {
   font-size: 11.5px;
   color: var(--gray-500);
+  margin-top: 1px;
 }
 
-.modalidad-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 10px;
-}
-
-.modalidad-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 12px 14px;
-  border-radius: var(--radius-md);
-  border: 1.5px solid var(--gray-200);
-  background: var(--gray-50);
-  cursor: pointer;
-  text-align: left;
-  transition: 0.2s;
-}
-
-.modalidad-card:hover {
-  border-color: var(--blue);
-  background: #f0f7ff;
-}
-
-.modalidad-card.selected {
-  border-color: var(--card-color, var(--navy));
-  background: color-mix(in srgb, var(--card-color, var(--navy)) 8%, white);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--card-color, var(--navy)) 15%, transparent);
-}
-
-.modalidad-icono {
-  font-size: 20px;
-  line-height: 1;
-}
-
-.modalidad-nombre {
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--navy);
-}
-
-.modalidad-desc {
-  font-size: 11px;
-  color: var(--gray-500);
-  line-height: 1.4;
-}
-
+/* Hints */
 .field-hint {
-  margin: 0;
   font-size: 11.5px;
   color: var(--gray-500);
-  line-height: 1.4;
+  margin: 2px 0 0;
 }
 
 .field-hint.warn {
   color: #b45309;
 }
 
-.resumen-box {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: var(--radius-md);
-  border: 1.5px solid var(--gray-200);
-  background: var(--gray-50);
-}
-
-.resumen-box strong {
-  font-size: 13px;
-  color: var(--navy);
-  display: block;
-  margin-bottom: 2px;
-}
-
-.resumen-box p {
-  margin: 0;
-  font-size: 12px;
+/* Contador de caracteres */
+.char-count {
+  font-size: 11px;
   color: var(--gray-500);
-}
-
-.text-green {
-  color: #10b981;
-  font-weight: 700;
-}
-
-.text-red {
-  color: #ef4444;
-  font-weight: 700;
-}
-
-.nota-evaluacion {
-  margin-top: 4px !important;
-  color: #0f766e !important;
-  font-style: italic;
-}
-
-.resumen-icono {
-  font-size: 24px;
-  flex-shrink: 0;
+  text-align: right;
   margin-top: 2px;
 }
 
-@media (max-width: 600px) {
-  .modalidad-grid {
-    grid-template-columns: 1fr;
+/* Transición */
+.slide-input-enter-active,
+.slide-input-leave-active {
+  transition: opacity 0.25s, transform 0.25s;
+}
+
+.slide-input-enter-from,
+.slide-input-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+@media (max-width: 480px) {
+  .tipo-usuario-grid {
+    flex-direction: column;
   }
 }
 </style>

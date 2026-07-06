@@ -46,63 +46,6 @@ watch(() => props.isOpen, async (abierto) => {
     saldoPendiente.value = 0
 
     cargandoFinanzas.value = true
-
-    // ─── LÓGICA INTELIGENTE UNIFICADA ───
-    if (props.sesion.idPaquete) {
-      
-      // 1. ES UN PAQUETE (Aplica igual para la Evaluación o la Sesión 5)
-      const totalPaquete = Number(props.sesion.monto_total_paquete || 0);
-      const abonado = Number(props.sesion.total_pagado_paquete || 0);
-
-      tratamientoAsociado.value = {
-        monto_total: totalPaquete,
-        total_sesiones: props.sesion.total_sesiones_paquete
-      };
-
-      // Calculamos la deuda real
-      saldoPendiente.value = Math.max(0, totalPaquete - abonado);
-      montoIngresado.value = saldoPendiente.value;
-
-    } else {
-      
-      // 2. ES UNA SESIÓN SUELTA (Sin paquete)
-      if (props.sesion.tipo === 'evaluacion') {
-        // Evaluación suelta sin paquete (Cortesía total)
-        saldoPendiente.value = 0;
-        montoIngresado.value = 0;
-      } else {
-        // Sesión suelta normal o masaje (Buscamos precio en catálogo)
-        const tipoABuscar = props.sesion.tipo === 'masaje' ? 'masaje' : 'sesion_suelta'
-        
-        const { data: catData } = await supabase
-          .from('Catalogo_Servicio')
-          .select('precio')
-          .eq('tipo', tipoABuscar)
-          .eq('activo', true)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single()
-
-        if (catData) {
-          precioSesionSuelta.value = Number(catData.precio)
-        }
-
-        // Buscamos si ya dejó algún adelanto para esta cita suelta
-        const { data: pagosPrevios } = await supabase
-          .from('Pago')
-          .select('monto')
-          .eq('idSesion', props.sesion.idSesion)
-
-        const totalAbonado = pagosPrevios
-          ? pagosPrevios.reduce((sum, p) => sum + Number(p.monto), 0)
-          : 0
-
-        saldoPendiente.value = Math.max(0, precioSesionSuelta.value - totalAbonado)
-        montoIngresado.value = saldoPendiente.value 
-      }
-    }
-
-    cargandoFinanzas.value = false
   }
 })
 

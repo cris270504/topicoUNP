@@ -6,29 +6,36 @@ import { useAlert } from '@/composables/useAlert'
 import { supabase } from '@/lib/supabaseClient'
 import { getTodayISO, getDateISO } from '@/lib/dateUtils'
 import ModalNuevaCita from '@/components/ModalNuevaCita.vue'
-import ModalConfirmarPago from '@/components/ModalConfirmarPago.vue'
 import ModalReprogramarCita from '@/components/ModalReprogramarCita.vue'
 
 const router = useRouter()
-const tarifario = ref([]);
+
 
 const {
   citas, fisios, pacientes, loading, loadingAccion,
   esFisioterapeuta, esPaciente, puedeGestionar,
-  initUser, fetchCitas, fetchFisios, fetchPacientes,
+  initUser, fetchCitas, fetchFisios, fetchPacientes, onBuscarPorCodigo, onBuscarPorDNI, obtenerSlots,
   crearCita, registrarCheckIn, cancelarCita, marcarInasistencia,
   confirmarAsistencia, formatFechaHora, getEstadoInfo, nombreCompleto, reprogramarCita
 } = useCitas()
 
 // Stubs para funciones pendientes de implementación
-const saldoPaciente = ref(null)
-const paquetes = ref([])
-const obtenerSlotsDisponibles = async () => []
-const fetchSaldoPaciente = async () => {}
-const fetchEvaluacionesHuerfanas = async () => []
-const fetchHorarioFisio = async () => {}
-const fetchPaquetesPaciente = async () => {}
-const fetchPaquetesCatalogo = async () => {}
+const obtenerSlotsDisponibles = async (
+  idFisioterapeuta,
+  fecha,
+  duracion
+) => {
+
+  const slots = []
+
+  for (let h = 8; h < 18; h++) {
+    slots.push(`${String(h).padStart(2, '0')}:00`)
+    slots.push(`${String(h).padStart(2, '0')}:30`)
+  }
+
+  return slots
+}
+const fetchHorarioFisio = async () => { }
 
 const { showAlert, showConfirm } = useAlert()
 
@@ -43,11 +50,22 @@ const columnas = computed(() => {
 
   return base
 })
+const servicios = ref([])
+const fetchServicios = async () => {
+  const { data, error } = await supabase
+    .from('servicio_topico')
+    .select('*')
+    .eq('activo', true)
+    .order('nombre_servicio')
+
+  if (!error) {
+    servicios.value = data || []
+  }
+}
 
 // ── Estado local de UI ────────────────────────────────────────────────────────
 const viewMode = ref('list')
 const showModalNueva = ref(false)
-const showModalPago = ref(false)
 const showModalCancelacion = ref(false)
 const showModalDetalle = ref(false)
 const showModalReprogramar = ref(false)
@@ -66,8 +84,8 @@ const mesActualNombre = computed(() => new Intl.DateTimeFormat('es-PE', { month:
 // Agrega esto en tu <script setup>, cerca de tus otras funciones "handle..."
 const handleNuevaCita = async (payload) => {
   if (await crearCita(payload)) {
-    showModalNueva.value = false;
-    await cargarCitas();
+    showModalNueva.value = false
+    await cargarCitas()
   }
 }
 
@@ -99,21 +117,10 @@ const celularPacienteFlat = (sesion) => `${sesion?.paciente_celular || ''}`.trim
 onMounted(async () => {
   await initUser()
 
-  if (puedeGestionar.value) {
-    // Cargamos de forma independiente. Si uno falla, el otro carga igual.
-    const promises = [fetchFisios(), fetchPacientes()];
-    if (fetchPaquetesCatalogo) promises.push(fetchPaquetesCatalogo());
-
-    promises.push(
-      // Verifica que esta consulta traiga 'idServicio', 'nombre', 'precio' y 'tipo'
-      supabase.from('Catalogo_Servicio').select('idServicio, nombre, precio, tipo, cantidad_sesiones').eq('activo', true)
-        .then(({ data }) => { tarifario.value = data || [] })
-    );
-
-    await Promise.allSettled(promises);
-  }
-
-  await cargarCitas()
+  await Promise.all([
+    fetchServicios(),
+    cargarCitas()
+  ])
 })
 
 const cargarCitas = async () => {
@@ -137,11 +144,7 @@ const abrirDetalleCalendario = (cita) => {
   sesionSeleccionada.value = cita; // ¿Cita realmente trae el idSesion?
   showModalDetalle.value = true
 }
-const abrirModalPago = (sesion) => { sesionSeleccionada.value = sesion; showModalPago.value = true; showModalDetalle.value = false }
 
-const handleConfirmarPago = async (payload) => {
-  showModalPago.value = false; await cargarCitas()
-}
 const handleCheckIn = async (sesion) => {
   // 1. Ejecutar el check-in
   const exito = await registrarCheckIn(sesion);
@@ -182,29 +185,9 @@ const handleInasistencia = async (sesion) => {
   if (await showConfirm(`¿Marcar inasistencia de ${sesion.paciente_nombres} ${sesion.paciente_apellidos}?`) && await marcarInasistencia(sesion.idCita)) await cargarCitas()
 }
 const abrirModalNueva = async () => {
-  // Ahora supabase ya está definido porque lo importaste arriba
-  if (!tarifario.value || tarifario.value.length === 0) {
-    const { data: dataTarifario, error } = await supabase // ✅ Ya no dará error aquí
-      .from('Catalogo_Servicio')
-      .select('*')
-      .eq('activo', true);
-
-    if (error) {
-      showAlert('Error al cargar catálogo: ' + error.message, 'error');
-      return;
-    }
-    tarifario.value = dataTarifario || [];
-  }
-
-  if (!tarifario.value || tarifario.value.length === 0) {
-    showAlert('⚠️ No es posible registrar citas: No hay servicios ni tarifas configuradas en el catálogo.', 'error')
-    return
-  }
-
   showModalNueva.value = true
 }
 
-const tratamientoParaRecargar = ref(null)
 
 const verHistorialClinico = (sesion) => {
   if (sesion && sesion.idPaciente) {
@@ -243,7 +226,6 @@ const accionesDe = (sesion) => {
   const mostrarBotonPago = (tieneDeudaIndividual || (tieneDeudaPaquete && !esEvaluacionSuelta));
 
   const yaFueReprogramada = !!(sesion?.idSesionOriginal || sesion?.id_sesion_original);
-  const tratamientoConcluido = !!sesion?.tratamiento_finalizado;
 
   return {
     puedeConfirmarAsistencia: puedeGestionar.value && e === 'reservada',
@@ -295,24 +277,6 @@ const verRegistroSesion = async (sesion) => {
   }
 }
 
-// Función para agregar sesiones (Abre el modal de Nueva Cita pre-configurado)
-const handleAgregarSesiones = (sesion) => {
-  // Preparamos el objeto para inyectarlo en el modal
-  tratamientoParaRecargar.value = {
-    // Si la sesión ya tiene un tratamiento, es una recarga normal
-    idTratamiento: sesion.idTratamiento,
-
-    // 👇 NUEVO: Si no tiene tratamiento y es una evaluación, es un Anclaje
-    idEvaluacionSesion: (!sesion.idTratamiento && sesion.tipo === 'evaluacion') ? sesion.idSesion : null,
-
-    idPaciente: sesion.idPaciente,
-    nombrePaciente: nombrePacienteFlat(sesion),
-    idFisioterapeuta: sesion.idFisioterapeuta,
-    nombreFisio: nombreFisioFlat(sesion)
-  }
-  showModalNueva.value = true
-}
-
 const obtenerSituacionCita = (sesion) => {
   // 1. Evaluación Inicial
   if (sesion.tipo === 'evaluacion') return { label: 'Evaluación Inicial', color: '#0f766e' };
@@ -323,27 +287,6 @@ const obtenerSituacionCita = (sesion) => {
 
   // 3. Si no es ninguna de las anteriores, es seguimiento
   return { label: 'Sesión de Seguimiento', color: '#64748b' };
-};
-
-// ── SISTEMA DE COLORES PARA TRATAMIENTOS (CICLOS) ──
-const PALETA_TRATAMIENTOS = [
-  '#ef4444', '#f97316', '#eab308', '#84cc16', '#22c55e', '#14b8a6',
-  '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7',
-  '#d946ef', '#ec4899', '#f43f5e'
-];
-
-const getColorTratamiento = (idTratamiento) => {
-  if (!idTratamiento) return '#94a3b8'; // Gris si es una sesión suelta o evaluación sin ciclo
-
-  // Convertimos el ID en un número (hash) para asegurar que siempre tenga el mismo color
-  let hash = 0;
-  const str = String(idTratamiento);
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  // Asignamos el color basado en el residuo
-  const index = Math.abs(hash) % PALETA_TRATAMIENTOS.length;
-  return PALETA_TRATAMIENTOS[index];
 };
 
 </script>
@@ -359,8 +302,8 @@ const getColorTratamiento = (idTratamiento) => {
 
       <div class="header-actions-group">
         <div class="view-switch">
-          <button type="button" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">📄 Lista</button>
-          <button type="button" :class="{ active: viewMode === 'calendar' }" @click="viewMode = 'calendar'">📅
+          <button type="button" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">Lista</button>
+          <button type="button" :class="{ active: viewMode === 'calendar' }" @click="viewMode = 'calendar'">
             Calendario</button>
         </div>
 
@@ -395,8 +338,6 @@ const getColorTratamiento = (idTratamiento) => {
               {{ f.Persona?.apellidos }}</option>
           </select>
         </div>
-        <button class="btn-secondary" @click="cargarCitas" :disabled="loading">{{ loading ? 'Cargando...' :
-          '🔄Actualizar' }}</button>
       </div>
 
       <div class="data-card">
@@ -419,7 +360,7 @@ const getColorTratamiento = (idTratamiento) => {
               <tr v-else-if="citas.length === 0">
                 <td :colspan="columnas.length" class="empty-row">No hay citas para los filtros.</td>
               </tr>
-              <tr v-else v-for="sesion in citas" :key="sesion.idSesion">
+              <tr v-else v-for="sesion in citas" :key="sesion.idcita"">
                 <td v-if="columnas.includes('paciente')">
                   <span class="patient-name">{{ nombrePacienteFlat(sesion) }}</span>
                   <span v-if="sesion.paciente_celular" class="patient-detail">{{ sesion.paciente_celular }}</span>
@@ -457,17 +398,9 @@ const getColorTratamiento = (idTratamiento) => {
                       📄 Ver Registro
                     </button>
 
-                    <!-- Botón para vender un paquete o agendar nueva cita -->
-                    <button v-if="accionesDe(sesion).puedeAgregarSesiones" class="accion-btn"
-                      style="background: #e0f2fe; color: #0284c7; border-color: #bae6fd;"
-                      @click="handleAgregarSesiones(sesion)">
-                      ➕ Agregar Sesiones
-                    </button>
                     <button v-if="accionesDe(sesion).puedeConfirmarAsistencia" class="accion-btn confirmar"
                       @click="handleConfirmarAsistencia(sesion)" :disabled="loadingAccion"
                       title="Confirmar asistencia por teléfono">📞 Confirmar</button>
-                    <button v-if="accionesDe(sesion).puedeConfirmarPago" class="accion-btn pago"
-                      @click="abrirModalPago(sesion)" title="Confirmar pago">💳 Pago</button>
                     <button v-if="accionesDe(sesion).puedeCheckIn" class="accion-btn checkin"
                       @click="handleCheckIn(sesion)" :disabled="loadingAccion">✅ Check-in</button>
                     <button v-if="accionesDe(sesion).puedeInasistencia" class="accion-btn inasistencia"
@@ -536,7 +469,7 @@ const getColorTratamiento = (idTratamiento) => {
                 <strong>Tratamiento:</strong>
                 <span class="tratamiento-pill"
                   :style="`color: ${getColorTratamiento(sesionSeleccionada.idTratamiento)}; border-color: ${getColorTratamiento(sesionSeleccionada.idTratamiento)}40; background-color: ${getColorTratamiento(sesionSeleccionada.idTratamiento)}15`">
-                  🔗 Ciclo #{{ sesionSeleccionada.idTratamiento }}
+                  Ciclo #{{ sesionSeleccionada.idTratamiento }}
                 </span>
               </p>
               <p><strong>Paciente:</strong> {{ nombrePacienteFlat(sesionSeleccionada) }}</p>
@@ -565,16 +498,8 @@ const getColorTratamiento = (idTratamiento) => {
                 📄 Ver Registro
               </button>
 
-              <button v-if="accionesDe(sesionSeleccionada).puedeAgregarSesiones" class="accion-btn"
-                style="background: #e0f2fe; color: #0284c7; border-color: #bae6fd;"
-                @click="handleAgregarSesiones(sesionSeleccionada)">
-                ➕ Agregar Sesiones
-              </button>
-
               <button v-if="accionesDe(sesionSeleccionada).puedeConfirmarAsistencia" class="accion-btn confirmar"
                 @click="handleConfirmarAsistencia(sesionSeleccionada)">📞 Confirmar</button>
-              <button v-if="accionesDe(sesionSeleccionada).puedeConfirmarPago" class="accion-btn pago"
-                @click="abrirModalPago(sesionSeleccionada)">💳 Pago</button>
               <button v-if="accionesDe(sesionSeleccionada).puedeCheckIn" class="accion-btn checkin"
                 @click="handleCheckIn(sesionSeleccionada)">✅ Check-in</button>
               <button v-if="accionesDe(sesionSeleccionada).puedeInasistencia" class="accion-btn inasistencia"
@@ -589,15 +514,9 @@ const getColorTratamiento = (idTratamiento) => {
       </div>
     </Transition>
 
-    <ModalNuevaCita :tarifario="tarifario" :isOpen="showModalNueva" :fisios="fisios" :pacientes="pacientes"
-      :paquetes="paquetes" :loadingAccion="loadingAccion" :saldoPaciente="saldoPaciente"
-      :obtenerSlots="obtenerSlotsDisponibles" :onFetchSaldoPaciente="fetchSaldoPaciente"
-      :onFetchEvaluaciones="fetchEvaluacionesHuerfanas" :tratamientoARecargar="tratamientoParaRecargar"
-      @close="showModalNueva = false; tratamientoParaRecargar = null" @submit="handleNuevaCita"
-      @paciente-changed="fetchPaquetesPaciente" @fisio-changed="fetchHorarioFisio"
-      @reset-saldo="saldoPaciente = null" />
-    <ModalConfirmarPago :isOpen="showModalPago" :sesion="sesionSeleccionada" :loadingAccion="loadingAccion"
-      @close="showModalPago = false" @submit="handleConfirmarPago" />
+    <ModalNuevaCita :isOpen="showModalNueva" :fisios="fisios" :servicios="servicios" :loadingAccion="loadingAccion"
+      :obtenerSlots="obtenerSlots" :onBuscarPorCodigo="onBuscarPorCodigo" :onBuscarPorDNI="onBuscarPorDNI"
+      @close="showModalNueva = false" @submit="handleNuevaCita" />
     <ModalReprogramarCita :isOpen="showModalReprogramar" :sesion="sesionSeleccionada" :fisios="fisios"
       :loadingAccion="loadingAccion" @close="showModalReprogramar = false" @submit="handleReprogramar" />
 

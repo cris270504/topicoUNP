@@ -1,362 +1,478 @@
+/**
+ * useCitas.js — Sistema Tópico Universitario
+ *
+ * Reescrito desde cero para la nueva BD:
+ * - Tabla central: "cita" (no "Sesion")
+ * - Sin Tratamiento, Paquete, estado_pago ni lógica de saldo
+ * - Sin domingo en horarios (dia_semana 1-6)
+ * - Búsqueda de paciente bifurcada:
+ *     estudiante  → codigo_universitario (tabla paciente)
+ *     docente / administrativo → numero_documento (tabla persona via JOIN)
+ * - Rol operativo: enfermera (reemplaza a secretaria)
+ * - idservicio es NOT NULL en cita → siempre obligatorio
+ *
+ * ESTADOS: pendiente | confirmada | en_triaje | en_consulta | completada | cancelada | ausente
+ */
+
 import { ref, computed } from 'vue'
 import { supabase } from '@/lib/supabaseClient'
 import { useAlert } from '@/composables/useAlert'
 
-// ─── Constantes de negocio (Adaptadas al Tópico) ──────────────
-export const MODALIDADES = [
-    {
-        id: 'evaluacion_inicial',
-        label: 'Evaluación Inicial',
-        descripcion: 'Primera consulta y diagnóstico fisioterapéutico',
-        icono: '🩺',
-        color: '#0f766e'
-    },
-    {
-        id: 'tratamiento',
-        label: 'Tratamiento',
-        descripcion: 'Ciclo de sesiones terapéuticas',
-        icono: '🔗',
-        color: '#2563eb'
-    },
-    {
-        id: 'masaje',
-        label: 'Masaje',
-        descripcion: 'Sesión de masaje terapéutico',
-        icono: '💆',
-        color: '#7c3aed'
-    }
+// ─── Constantes de negocio ────────────────────────────────────────────────────
+
+export const TIPOS_USUARIO = [
+  { id: 'estudiante',      label: 'Estudiante',      campoBusqueda: 'codigo_universitario' },
+  { id: 'docente',         label: 'Docente',          campoBusqueda: 'numero_documento' },
+  { id: 'administrativo',  label: 'Administrativo',   campoBusqueda: 'numero_documento' },
 ]
 
 export const ESTADOS_CITA = {
-    pendiente: { label: 'Pendiente', color: '#f59e0b', bg: '#fef3c7' },
-    confirmada: { label: 'Confirmada', color: '#10b981', bg: '#d1fae5' },
-    en_triaje: { label: 'En Triaje', color: '#8b5cf6', bg: '#ede9fe' },
-    en_consulta: { label: 'En Consulta', color: '#3b82f6', bg: '#dbeafe' },
-    completada: { label: 'Completada', color: '#14b8a6', bg: '#ccfbf1' },
-    cancelada: { label: 'Cancelada', color: '#ef4444', bg: '#fee2e2' },
-    ausente: { label: 'Ausente', color: '#6b7280', bg: '#f3f4f6' },
+  pendiente:    { label: 'Pendiente',    color: '#f59e0b', bg: '#fef3c7' },
+  confirmada:   { label: 'Confirmada',   color: '#10b981', bg: '#d1fae5' },
+  en_triaje:    { label: 'En triaje',    color: '#6366f1', bg: '#ede9fe' },
+  en_consulta:  { label: 'En consulta',  color: '#0ea5e9', bg: '#e0f2fe' },
+  completada:   { label: 'Completada',   color: '#3b82f6', bg: '#dbeafe' },
+  cancelada:    { label: 'Cancelada',    color: '#ef4444', bg: '#fee2e2' },
+  ausente:      { label: 'Ausente',      color: '#6b7280', bg: '#f3f4f6' },
 }
 
-const userRole = ref(null)
-const userId = ref(null)
-
-// ─── Composable ───────────────────────────────────────────────
+// ─── Composable ───────────────────────────────────────────────────────────────
 export function useCitas() {
-    const { showAlert } = useAlert()
+  const { showAlert } = useAlert()
 
-    // ── Estado ──────────────────────────────────────────────────
-    const citas = ref([])
-    const personalSalud = ref([]) // Reemplaza a fisios
-    const pacientes = ref([])
-    const horarios = ref([])
-    const servicios = ref([]) // Reemplaza a tarifario
+  // ── Estado ──────────────────────────────────────────────────────────────────
+  const citas         = ref([])
+  const fisios        = ref([])
+  const servicios     = ref([])   // catálogo de servicio_topico
+  const horarios      = ref([])
+  const loading       = ref(false)
+  const loadingAccion = ref(false)
 
-    const loading = ref(false)
-    const loadingAccion = ref(false)
+  const userRole = ref(null)
+  const userId   = ref(null)
 
-    // ── Computed de rol ─────────────────────────────────────────
-    const esPersonalSalud = computed(() => userRole.value === 'fisioterapeuta')
-    const esenfermera = computed(() => userRole.value === 'enfermera')
-    const esPaciente = computed(() => userRole.value === 'paciente')
-    const esAdmin = computed(() => userRole.value === 'admin')
-    const puedeGestionar = computed(() => esenfermera.value || esAdmin.value)
+  // ── Computed de rol ─────────────────────────────────────────────────────────
+  const esEnfermera      = computed(() => userRole.value === 'enfermera')
+  const esFisioterapeuta = computed(() => userRole.value === 'fisioterapeuta')
+  const esPaciente       = computed(() => userRole.value === 'paciente')
+  const esAdmin          = computed(() => userRole.value === 'admin')
+  const puedeGestionar   = computed(() => esEnfermera.value || esAdmin.value)
 
-    // ── initUser ────────────────────────────────────────────────
-    const initUser = async () => {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) {
-            const rawRol = user.user_metadata?.rol || 'paciente'
-            userRole.value = rawRol === 'fisioterapeuta' ? 'fisioterapeuta' : rawRol
-            userId.value = user.id
+  // ── initUser ────────────────────────────────────────────────────────────────
+  const initUser = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) throw new Error('No hay sesión de usuario activa')
+    userRole.value = user.user_metadata?.rol || 'paciente'
+    userId.value   = user.id
+  }
+
+  // ── fetchCitas ──────────────────────────────────────────────────────────────
+  const fetchCitas = async (filtros = {}) => {
+    if (!userId.value) await initUser()
+
+    loading.value = true
+    try {
+      let query = supabase
+        .from('cita')
+        .select(`
+          idcita,
+          fecha_hora,
+          estado,
+          motivo_consulta,
+          paciente_en_sala,
+          idpaciente,
+          idfisioterapeuta,
+          idservicio,
+          servicio_topico ( nombre_servicio, duracion_estimada_minutos ),
+          paciente (
+            idpaciente,
+            codigo_universitario,
+            tipo_usuario,
+            facultad_escuela,
+            persona ( nombres, apellidos, celular, numero_documento )
+          ),
+          fisioterapeuta (
+            idfisioterapeuta,
+            especialidad,
+            persona ( nombres, apellidos )
+          )
+        `)
+
+      // Filtro por rol
+      if (esPaciente.value)       query = query.eq('idpaciente', userId.value)
+      if (esFisioterapeuta.value) query = query.eq('idfisioterapeuta', userId.value)
+
+      // Filtros opcionales
+      if (filtros.fecha) {
+        const inicio = `${filtros.fecha}T00:00:00-05:00`
+        const fin    = `${filtros.fecha}T23:59:59-05:00`
+        query = query.gte('fecha_hora', inicio).lte('fecha_hora', fin)
+      }
+      if (filtros.rangoInicio && filtros.rangoFin) {
+        query = query.gte('fecha_hora', filtros.rangoInicio).lte('fecha_hora', filtros.rangoFin)
+      }
+      if (filtros.estado)           query = query.eq('estado', filtros.estado)
+      if (filtros.idfisioterapeuta) query = query.eq('idfisioterapeuta', filtros.idfisioterapeuta)
+
+      const { data, error } = await query.order('fecha_hora', { ascending: true })
+      if (error) throw error
+      citas.value = data ?? []
+    } catch (err) {
+      showAlert('Error al cargar citas: ' + err.message, 'error')
+    } finally {
+      loading.value = false
+    }
+  }
+
+  // ── Búsqueda dinámica de paciente por código universitario ──────────────────
+  // Retorna array de coincidencias mientras el usuario escribe
+  const buscarPacientePorCodigo = async (codigoParcial) => {
+    if (!codigoParcial || codigoParcial.length < 3) return []
+    try {
+      const { data, error } = await supabase
+        .from('paciente')
+        .select(`
+          idpaciente,
+          codigo_universitario,
+          tipo_usuario,
+          facultad_escuela,
+          persona ( nombres, apellidos, celular )
+        `)
+        .eq('tipo_usuario', 'estudiante')
+        .ilike('codigo_universitario', `%${codigoParcial}%`)
+        .limit(10)
+
+      if (error) throw error
+      return data ?? []
+    } catch (err) {
+      showAlert('Error en búsqueda: ' + err.message, 'error')
+      return []
+    }
+  }
+
+  // ── Búsqueda dinámica de paciente por DNI (docente / administrativo) ────────
+  const buscarPacientePorDNI = async (dniParcial, tipoUsuario) => {
+    if (!dniParcial || dniParcial.length < 4) return []
+    try {
+      // Join inverso: persona → paciente, filtrando por numero_documento
+      const { data, error } = await supabase
+        .from('paciente')
+        .select(`
+          idpaciente,
+          codigo_universitario,
+          tipo_usuario,
+          facultad_escuela,
+          persona!inner ( idpersona, nombres, apellidos, celular, numero_documento )
+        `)
+        .eq('tipo_usuario', tipoUsuario)
+        .ilike('persona.numero_documento', `%${dniParcial}%`)
+        .limit(10)
+
+      if (error) throw error
+      return data ?? []
+    } catch (err) {
+      showAlert('Error en búsqueda: ' + err.message, 'error')
+      return []
+    }
+  }
+
+  // ── fetchFisios ─────────────────────────────────────────────────────────────
+  const fetchFisios = async () => {
+    const { data, error } = await supabase
+      .from('fisioterapeuta')
+      .select(`
+        idfisioterapeuta,
+        especialidad,
+        persona ( nombres, apellidos )
+      `)
+      .eq('activo', true)
+      .order('idfisioterapeuta')
+
+    if (error) { showAlert('Error al cargar fisioterapeutas: ' + error.message, 'error'); return }
+    fisios.value = data ?? []
+  }
+
+  // ── fetchServicios ──────────────────────────────────────────────────────────
+  // Carga el catálogo de servicio_topico (reemplaza al tarifario anterior)
+  const fetchServicios = async () => {
+    const { data, error } = await supabase
+      .from('servicio_topico')
+      .select('idservicio, nombre_servicio, descripcion, duracion_estimada_minutos')
+      .eq('activo', true)
+      .order('nombre_servicio')
+
+    if (error) { showAlert('Error al cargar servicios: ' + error.message, 'error'); return }
+    servicios.value = data ?? []
+  }
+
+  // ── fetchHorarioFisio ───────────────────────────────────────────────────────
+  const fetchHorarioFisio = async (idfisioterapeuta) => {
+    if (!idfisioterapeuta) { horarios.value = []; return }
+    const { data, error } = await supabase
+      .from('horario')
+      .select('dia_semana, hora_inicio, hora_fin')
+      .eq('idfisioterapeuta', idfisioterapeuta)
+
+    if (error) { showAlert('Error al cargar horario: ' + error.message, 'error'); return }
+    horarios.value = data ?? []
+  }
+
+  // ── obtenerSlotsDisponibles ─────────────────────────────────────────────────
+  // dia_semana 1=Lunes … 6=Sábado (NO hay domingo en esta BD)
+  const obtenerSlotsDisponibles = async (idfisioterapeuta, fechaStr, duracionMinutos) => {
+    if (!idfisioterapeuta || !fechaStr) return []
+
+    const [yyyy, mm, dd] = fechaStr.split('-')
+    const fechaLocal = new Date(Number(yyyy), Number(mm) - 1, Number(dd))
+    let diaSemana = fechaLocal.getDay() // 0=Dom, 1=Lun … 6=Sáb
+
+    // El horario solo cubre lunes-sábado (1-6). Si es domingo retornamos vacío.
+    if (diaSemana === 0) return []
+
+    const { data: bloques } = await supabase
+      .from('horario')
+      .select('hora_inicio, hora_fin')
+      .eq('idfisioterapeuta', idfisioterapeuta)
+      .eq('dia_semana', diaSemana)
+
+    if (!bloques?.length) return []
+
+    // Citas que ya ocupan ese día (excluimos canceladas y ausentes)
+    const inicioDia = `${yyyy}-${mm}-${dd}T00:00:00-05:00`
+    const finDia    = `${yyyy}-${mm}-${dd}T23:59:59-05:00`
+
+    const { data: citasDia } = await supabase
+      .from('cita')
+      .select('fecha_hora, idservicio, servicio_topico ( duracion_estimada_minutos )')
+      .eq('idfisioterapeuta', idfisioterapeuta)
+      .gte('fecha_hora', inicioDia)
+      .lte('fecha_hora', finDia)
+      .not('estado', 'in', '(cancelada,ausente)')
+
+    const ocupados = (citasDia ?? []).map(c => {
+      const fc = new Date(c.fecha_hora)
+      const ini = fc.getHours() * 60 + fc.getMinutes()
+      const dur = c.servicio_topico?.duracion_estimada_minutos ?? 20
+      return { inicio: ini, fin: ini + dur }
+    })
+
+    const parseTime  = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m }
+    const formatTime = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+
+    const slots = []
+    for (const bloque of bloques) {
+      let actual = parseTime(bloque.hora_inicio)
+      const fin  = parseTime(bloque.hora_fin)
+
+      while (actual + duracionMinutos <= fin) {
+        const finActual = actual + duracionMinutos
+        const choque = ocupados.find(o => actual < o.fin && finActual > o.inicio)
+        if (!choque) {
+          slots.push(formatTime(actual))
+          actual += duracionMinutos
         } else {
-            clearUser() // Limpia la memoria si no hay sesión
-            throw new Error('No hay sesión de usuario activa')
+          actual = choque.fin
         }
+      }
+    }
+    return slots
+  }
+
+  // ── crearCita ───────────────────────────────────────────────────────────────
+  const crearCita = async (payload) => {
+    const {
+      idpaciente,
+      idfisioterapeuta,
+      idservicio,
+      fecha_hora,
+      motivo_consulta = null,
+    } = payload
+
+    if (!idpaciente)       { showAlert('Debe seleccionar un paciente.', 'error');       return false }
+    if (!idfisioterapeuta) { showAlert('Debe seleccionar un fisioterapeuta.', 'error'); return false }
+    if (!idservicio)       { showAlert('Debe seleccionar un servicio.', 'error');        return false }
+    if (!fecha_hora)       { showAlert('Debe seleccionar fecha y hora.', 'error');       return false }
+
+    // Verificar disponibilidad antes de insertar
+    const duracion = servicios.value.find(s => s.idservicio === idservicio)?.duracion_estimada_minutos ?? 20
+    const ocupado = await verificarDisponibilidad(idfisioterapeuta, fecha_hora, duracion)
+    if (ocupado) {
+      showAlert('Ese horario ya está ocupado para el fisioterapeuta seleccionado.', 'error')
+      return false
     }
 
-    const clearUser = () => {
-        userRole.value = null
-        userId.value = null
+    loadingAccion.value = true
+    try {
+      const { data, error } = await supabase
+        .from('cita')
+        .insert({
+          idpaciente,
+          idfisioterapeuta,
+          idservicio,
+          fecha_hora,
+          motivo_consulta: motivo_consulta?.trim() || null,
+          estado: 'pendiente',
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+      showAlert('✅ Cita registrada exitosamente.', 'success')
+      return data
+
+    } catch (err) {
+      showAlert('Error al registrar la cita: ' + err.message, 'error')
+      return false
+    } finally {
+      loadingAccion.value = false
     }
+  }
 
-    // ── fetchCitas ──────────────────────────────────────────────
-    const fetchCitas = async (filtros = {}) => {
-        if (!userId.value) await initUser()
+  // ── registrarCheckIn ────────────────────────────────────────────────────────
+  const registrarCheckIn = async (cita) => {
+    if (!cita?.idcita) { showAlert('Cita inválida.', 'error'); return false }
+    loadingAccion.value = true
+    try {
+      const { error } = await supabase
+        .from('cita')
+        .update({ paciente_en_sala: true, estado: 'en_triaje' })
+        .eq('idcita', cita.idcita)
+        .eq('estado', 'confirmada')  // solo se puede hacer check-in si está confirmada
 
-        if (!userId.value && (esPaciente.value || esPersonalSalud.value)) {
-            showAlert('Error: Usuario no autenticado.', 'error')
-            return
-        }
-
-        loading.value = true
-        try {
-            let query = supabase.from('cita')
-                .select(`
-                    idcita, fecha_hora, motivo_consulta, estado, paciente_en_sala, created_at,
-                    servicio_topico ( idservicio, nombre_servicio, duracion_estimada_minutos ),
-                    paciente ( idpaciente, codigo_universitario, tipo_usuario, persona ( nombres, apellidos, celular ) ),
-                    fisioterapeuta ( idfisioterapeuta, especialidad, persona ( nombres, apellidos ) )
-                `)
-
-            // Filtros de seguridad por rol
-            if (esPaciente.value && userId.value) {
-                query = query.eq('idpaciente', userId.value)
-            } else if (esPersonalSalud.value && userId.value) {
-                query = query.eq('idfisioterapeuta', userId.value)
-            }
-
-            // Filtros de búsqueda
-            if (filtros.rangoInicio && filtros.rangoFin) {
-                query = query.gte('fecha_hora', filtros.rangoInicio).lte('fecha_hora', filtros.rangoFin)
-            } else if (filtros.fecha) {
-                const inicio = `${filtros.fecha}T00:00:00-05:00`
-                const fin = `${filtros.fecha}T23:59:59-05:00`
-                query = query.gte('fecha_hora', inicio).lte('fecha_hora', fin)
-            }
-
-            if (filtros.estado) query = query.eq('estado', filtros.estado)
-            if (filtros.idfisioterapeuta) query = query.eq('idfisioterapeuta', filtros.idfisioterapeuta)
-
-            const { data, error } = await query.order('fecha_hora', { ascending: true })
-            if (error) throw error
-
-            // Normalizar a campos planos para compatibilidad con CitasView
-            citas.value = (data ?? []).map(c => ({
-                ...c,
-                idCita: c.idcita,
-                idSesion: c.idcita,
-                idFisioterapeuta: c.idfisioterapeuta,
-                idPaciente: c.paciente?.idpaciente,
-                paciente_nombres: c.paciente?.persona?.nombres ?? '',
-                paciente_apellidos: c.paciente?.persona?.apellidos ?? '',
-                paciente_celular: c.paciente?.persona?.celular ?? '',
-                fisio_nombres: c.fisioterapeuta?.persona?.nombres ?? '',
-                fisio_apellidos: c.fisioterapeuta?.persona?.apellidos ?? '',
-                fisio_especialidad: c.fisioterapeuta?.especialidad ?? '',
-            }))
-        } catch (err) {
-            showAlert('Error al cargar citas: ' + err.message, 'error')
-        } finally {
-            loading.value = false
-        }
+      if (error) throw error
+      Object.assign(cita, { paciente_en_sala: true, estado: 'en_triaje' })
+      showAlert('✅ Paciente registrado en tópico.', 'success')
+      return true
+    } catch (err) {
+      showAlert('Error al registrar check-in: ' + err.message, 'error')
+      return false
+    } finally {
+      loadingAccion.value = false
     }
+  }
 
-    // ── fetchPersonalSalud ──────────────────────────────────────
-    const fetchPersonalSalud = async () => {
-        const { data, error } = await supabase
-            .from('fisioterapeuta')
-            .select(`
-                idfisioterapeuta, tipo_personal, especialidad, activo,
-                persona ( nombres, apellidos )
-            `)
-            .eq('activo', true)
+  // ── confirmarCita ───────────────────────────────────────────────────────────
+  // Cambia de 'pendiente' → 'confirmada' (confirmación telefónica / presencial)
+  const confirmarCita = async (idcita) => {
+    loadingAccion.value = true
+    try {
+      const { error } = await supabase
+        .from('cita')
+        .update({ estado: 'confirmada' })
+        .eq('idcita', idcita)
+        .eq('estado', 'pendiente')
 
-        if (error) { showAlert('Error al cargar personal: ' + error.message, 'error'); return }
-        personalSalud.value = (data ?? []).map(p => ({
-            ...p,
-            idfisioterapeuta: p.idfisioterapeuta,
-            Persona: p.persona,
-        }))
+      if (error) throw error
+      showAlert('✅ Cita confirmada.', 'success')
+      return true
+    } catch (err) {
+      showAlert('Error al confirmar la cita: ' + err.message, 'error')
+      return false
+    } finally {
+      loadingAccion.value = false
     }
+  }
 
-    // ── fetchPacientes ──────────────────────────────────────────
-    const fetchPacientes = async () => {
-        const { data, error } = await supabase
-            .from('paciente')
-            .select(`
-                idpaciente, codigo_universitario, facultad_escuela, tipo_usuario,
-                persona ( nombres, apellidos, celular, numero_documento )
-            `)
+  // ── cancelarCita ────────────────────────────────────────────────────────────
+  const cancelarCita = async ({ idcita, motivo }) => {
+    if (!motivo?.trim()) { showAlert('Ingrese el motivo de cancelación.', 'error'); return false }
+    loadingAccion.value = true
+    try {
+      const { error } = await supabase
+        .from('cita')
+        .update({ estado: 'cancelada', motivo_consulta: motivo.trim() })
+        .eq('idcita', idcita)
+        .in('estado', ['pendiente', 'confirmada'])
 
-        if (error) { showAlert('Error al cargar pacientes: ' + error.message, 'error'); return }
-        pacientes.value = (data ?? []).map(p => ({
-            ...p,
-            idPaciente: p.idpaciente,
-            Persona: p.persona,
-        }))
+      if (error) throw error
+      showAlert('Cita cancelada.', 'info')
+      return true
+    } catch (err) {
+      showAlert('Error al cancelar: ' + err.message, 'error')
+      return false
+    } finally {
+      loadingAccion.value = false
     }
+  }
 
-    // ── fetchServicios ──────────────────────────────────────────
-    const fetchServicios = async () => {
-        const { data, error } = await supabase
-            .from('servicio_topico')
-            .select('idservicio, nombre_servicio, descripcion, duracion_estimada_minutos')
-            .eq('activo', true)
+  // ── marcarAusente ───────────────────────────────────────────────────────────
+  const marcarAusente = async (idcita) => {
+    loadingAccion.value = true
+    try {
+      const { error } = await supabase
+        .from('cita')
+        .update({ estado: 'ausente' })
+        .eq('idcita', idcita)
+        .in('estado', ['confirmada', 'pendiente'])
 
-        if (!error) servicios.value = data ?? []
+      if (error) throw error
+      showAlert('Inasistencia registrada.', 'info')
+      return true
+    } catch (err) {
+      showAlert('Error: ' + err.message, 'error')
+      return false
+    } finally {
+      loadingAccion.value = false
     }
+  }
 
-    // ── crearCita (Flujo Simplificado) ──────────────────────────
-    const crearCita = async (payload) => {
-        const { idPaciente, idfisioterapeuta, idServicio, fecha_hora, motivo_consulta } = payload
+  // ── verificarDisponibilidad ─────────────────────────────────────────────────
+  const verificarDisponibilidad = async (idfisioterapeuta, fecha_hora, duracionMinutos = 20) => {
+    const fecha = new Date(fecha_hora)
+    const fin   = new Date(fecha.getTime() + duracionMinutos * 60 * 1000)
 
-        if (!idPaciente || !idServicio || !fecha_hora) {
-            showAlert('Faltan datos obligatorios para agendar.', 'error')
-            return false
-        }
+    const { data } = await supabase
+      .from('cita')
+      .select('idcita')
+      .eq('idfisioterapeuta', idfisioterapeuta)
+      .not('estado', 'in', '(cancelada,ausente)')
+      .gte('fecha_hora', fecha.toISOString())
+      .lt('fecha_hora', fin.toISOString())
+      .limit(1)
 
-        if (idfisioterapeuta) {
-            const ocupado = await verificarDisponibilidad(idfisioterapeuta, fecha_hora)
-            if (ocupado) {
-                showAlert('El especialista ya tiene una cita en ese horario.', 'error')
-                return false
-            }
-        }
+    return (data?.length ?? 0) > 0
+  }
 
-        loadingAccion.value = true
-        try {
-            const { data, error } = await supabase
-                .from('cita')
-                .insert({
-                    idpaciente: idPaciente,
-                    idfisioterapeuta: idfisioterapeuta || null,
-                    idservicio: idServicio,
-                    fecha_hora,
-                    motivo_consulta,
-                    estado: 'pendiente'
-                })
-                .select()
-                .single()
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+  const formatFechaHora = (iso) => {
+    if (!iso) return '—'
+    return new Intl.DateTimeFormat('es-PE', {
+      weekday: 'short', day: '2-digit', month: 'short',
+      year: 'numeric', hour: '2-digit', minute: '2-digit',
+      hour12: true, timeZone: 'America/Lima',
+    }).format(new Date(iso))
+  }
 
-            if (error) throw error
-            showAlert('✅ Cita agendada correctamente.', 'success')
-            return data
-        } catch (err) {
-            showAlert('Error al registrar: ' + err.message, 'error')
-            return false
-        } finally {
-            loadingAccion.value = false
-        }
-    }
+  const getEstadoInfo = (estado) =>
+    ESTADOS_CITA[estado] ?? { label: estado, color: '#64748b', bg: '#f1f5f9' }
 
-    // ── reprogramarCita ─────────────────────────────────────────
-    const reprogramarCita = async ({ idCita, idfisioterapeutaNuevo, nuevaFechaHora, motivo }) => {
-        if (!motivo?.trim() || !nuevaFechaHora) {
-            showAlert('Faltan datos para reprogramar.', 'error'); return false
-        }
+  const nombreCompleto = (persona) => {
+    if (!persona) return '—'
+    return `${persona.nombres ?? ''} ${persona.apellidos ?? ''}`.trim()
+  }
 
-        const fechaCita = new Date(nuevaFechaHora)
-        if (fechaCita < new Date()) {
-            showAlert('La fecha no puede ser en el pasado.', 'error'); return false
-        }
+  // Nombre plano desde la estructura de JOIN de fetchCitas
+  const nombrePacienteFlat = (cita) =>
+    `${cita?.paciente?.persona?.nombres ?? ''} ${cita?.paciente?.persona?.apellidos ?? ''}`.trim() || '—'
 
-        loadingAccion.value = true
-        try {
-            // Actualización directa, el trigger Historial_Estado_Cita registrará el cambio
-            const { error } = await supabase
-                .from('cita')
-                .update({
-                    fecha_hora: nuevaFechaHora,
-                    idfisioterapeuta: idfisioterapeutaNuevo || null,
-                    motivo_consulta: motivo
-                })
-                .eq('idcita', idCita)
+  const nombreFisioFlat = (cita) =>
+    `${cita?.fisioterapeuta?.persona?.nombres ?? ''} ${cita?.fisioterapeuta?.persona?.apellidos ?? ''}`.trim() || '—'
 
-            if (error) throw error
-            showAlert('✅ Cita reprogramada.', 'success')
-            return true
-        } catch (err) {
-            showAlert('Error al reprogramar: ' + err.message, 'error')
-            return false
-        } finally {
-            loadingAccion.value = false
-        }
-    }
-
-    // ── Controles de Estado de Cita ─────────────────────────────
-    const cancelarCita = async (idCita, motivo) => {
-        if (!motivo?.trim()) { showAlert('Ingrese el motivo.', 'error'); return false }
-        return actualizarEstadoCita(idCita, 'cancelada')
-    }
-
-    const registrarCheckIn = async (idCita) => {
-        return actualizarEstadoCita(idCita, 'en_triaje', { paciente_en_sala: true })
-    }
-
-    const confirmarAsistencia = async (idCita) => {
-        return actualizarEstadoCita(idCita, 'confirmada')
-    }
-
-    const marcarInasistencia = async (idCita) => {
-        return actualizarEstadoCita(idCita, 'ausente')
-    }
-
-    // Helper interno para DRY (Don't Repeat Yourself)
-    const actualizarEstadoCita = async (idCita, nuevoEstado, extraCampos = {}) => {
-        loadingAccion.value = true
-        try {
-            const { error } = await supabase
-                .from('cita')
-                .update({ estado: nuevoEstado, ...extraCampos })
-                .eq('idcita', idCita)
-
-            if (error) throw error
-            showAlert(`✅ Estado actualizado a: ${ESTADOS_CITA[nuevoEstado].label}`, 'success')
-            return true
-        } catch (err) {
-            showAlert('Error al actualizar estado: ' + err.message, 'error')
-            return false
-        } finally {
-            loadingAccion.value = false
-        }
-    }
-
-    // ── verificarDisponibilidad ─────────────────────────────────
-    const verificarDisponibilidad = async (idfisioterapeuta, fecha_hora) => {
-        const fecha = new Date(fecha_hora)
-        const year = fecha.getFullYear()
-        const month = String(fecha.getMonth() + 1).padStart(2, '0')
-        const day = String(fecha.getDate()).padStart(2, '0')
-        const hours = String(fecha.getHours()).padStart(2, '0')
-        const minutes = String(fecha.getMinutes()).padStart(2, '0')
-
-        const inicioBusqueda = `${year}-${month}-${day} ${hours}:${minutes}:00`
-
-        const fechaFin = new Date(fecha.getTime() + (29 * 60 * 1000)) // Asumimos bloques de 30 min aprox
-        const finBusqueda = `${fechaFin.getFullYear()}-${String(fechaFin.getMonth() + 1).padStart(2, '0')}-${String(fechaFin.getDate()).padStart(2, '0')} ${String(fechaFin.getHours()).padStart(2, '0')}:${String(fechaFin.getMinutes()).padStart(2, '0')}:59`
-
-        const { data, error } = await supabase
-            .from('cita')
-            .select('idcita')
-            .eq('idfisioterapeuta', idfisioterapeuta)
-            .not('estado', 'in', '("cancelada","ausente","completada")')
-            .gte('fecha_hora', inicioBusqueda)
-            .lt('fecha_hora', finBusqueda)
-            .limit(1)
-
-        if (error) return true
-        return (data?.length ?? 0) > 0
-    }
-
-    // ── Helpers de UI ───────────────────────────────────────────
-    const formatFechaHora = (iso) => {
-        if (!iso) return '—'
-        return new Intl.DateTimeFormat('es-PE', {
-            weekday: 'short', day: '2-digit', month: 'short',
-            year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true,
-            timeZone: 'America/Lima'
-        }).format(new Date(iso))
-    }
-
-    const getEstadoInfo = (estado) => ESTADOS_CITA[estado] ?? { label: estado, color: '#64748b', bg: '#f1f5f9' }
-
-    const nombreCompleto = (persona) => {
-        if (!persona) return '—'
-        return `${persona.nombres ?? ''} ${persona.apellidos ?? ''}`.trim()
-    }
-
-    return {
-        citas, personalSalud, fisios: personalSalud, pacientes, horarios, servicios,
-        loading, loadingAccion, userRole, userId,
-
-        esPersonalSalud, esFisioterapeuta: esPersonalSalud,
-        esenfermera, esPaciente, esAdmin, puedeGestionar,
-
-        initUser, fetchCitas, fetchPersonalSalud, fetchFisios: fetchPersonalSalud,
-        fetchPacientes, fetchServicios,
-        crearCita, reprogramarCita,
-        registrarCheckIn, confirmarAsistencia, marcarInasistencia, cancelarCita,
-
-        formatFechaHora, getEstadoInfo, nombreCompleto, verificarDisponibilidad, clearUser
-    }
+  return {
+    // Estado
+    citas, fisios, servicios, horarios,
+    loading, loadingAccion, userRole, userId,
+    // Computed de rol
+    esEnfermera, esFisioterapeuta, esPaciente, esAdmin, puedeGestionar,
+    // Acciones
+    initUser,
+    fetchCitas, fetchFisios, fetchServicios, fetchHorarioFisio,
+    buscarPacientePorCodigo, buscarPacientePorDNI,
+    obtenerSlotsDisponibles,
+    crearCita, confirmarCita, registrarCheckIn,
+    cancelarCita, marcarAusente,
+    // Helpers
+    formatFechaHora, getEstadoInfo, nombreCompleto,
+    nombrePacienteFlat, nombreFisioFlat,
+  }
 }

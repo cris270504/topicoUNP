@@ -9,7 +9,6 @@ const { showAlert, showConfirm } = useAlert()
 const router = useRouter()
 
 const irAHistoriaClinica = (id) => {
-    // Aseguramos que el nombre del parámetro coincida exactamente con la ruta configurada
     router.push({ name: 'HistoriaClinica', params: { idPaciente: id } })
 }
 
@@ -22,7 +21,7 @@ const selectedPaciente = ref(null)
 const fetchPacientes = async () => {
     try {
         const { data, error } = await supabase
-            .from('paciente') // 👈 Minúsculas para evitar el error 404
+            .from('paciente')
             .select(`
                 idpaciente,
                 codigo_universitario,
@@ -63,11 +62,6 @@ const filteredPacientes = computed(() => {
     })
 })
 
-// Controladores de Apertura Dinámica
-const openCreateForm = () => {
-    selectedPaciente.value = null
-    isModalOpen.value = true
-}
 
 const openEditForm = (paciente) => {
     selectedPaciente.value = paciente
@@ -107,14 +101,6 @@ onMounted(() => {
                 <h2>Gestión de Pacientes</h2>
                 <p>Control de admisiones de la comunidad universitaria (Tópico UNP).</p>
             </div>
-            <button class="primary-btn" @click="openCreateForm">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                    stroke-linejoin="round" class="btn-icon">
-                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-                Registrar Paciente
-            </button>
         </div>
 
         <div class="data-card"
