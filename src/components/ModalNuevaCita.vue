@@ -7,19 +7,14 @@ const props = defineProps({
   isOpen: { type: Boolean, required: true },
   fisios: { type: Array, default: () => [] },
   pacientes: { type: Array, default: () => [] },
-  paquetes: { type: Array, default: () => [] },
   servicios: { type: Array, default: () => [] },
   loadingAccion: { type: Boolean, default: false },
-  saldoPaciente: { type: Object, default: null },
   obtenerSlots: { type: Function, required: true },
   onBuscarPorCodigo: { type: Function, required: true },
   onBuscarPorDNI: { type: Function, required: true },
-  onFetchSaldoPaciente: { type: Function, required: false },
-  onFetchEvaluaciones: { type: Function, required: false },
-  tratamientoARecargar: { type: Object, default: null },
 })
 
-const emit = defineEmits(['close', 'submit', 'fisio-changed', 'reset-saldo'])
+const emit = defineEmits(['close', 'submit', 'fisio-changed'])
 
 // ── Campos del formulario ────────────────────────────────────────────────────
 const tipoBusqueda = ref(null)
@@ -28,71 +23,55 @@ const resultadosBusqueda = ref([])
 const buscando = ref(false)
 const pacienteSeleccionado = ref(null)
 
-const idFisioterapeuta = ref(null)
+const idfisioterapeuta = ref(null)
 const idservicio = ref(null)
 const motivoConsulta = ref('')
 
 // ── Lógica Dinámica de Múltiples Sesiones ────────────────────────────────────
 const cantidadSesiones = ref(1)
-
-// Estructura dinámica para N sesiones: [{ fecha: '', hora: '', slots: [], loading: false }]
-const sesiones = ref([
-  { fecha: '', hora: '', slots: [], loading: false }
-])
-
+const sesiones = ref([{ fecha: '', hora: '', slots: [], loading: false }])
 const fechaMin = computed(() => getTodayISO())
 
-// Detectamos si el servicio seleccionado es fisioterapia (ignorando mayúsculas)
 const esSesionFisioterapia = computed(() => {
   if (!idservicio.value) return false
-  const serv = props.servicios.find(s => (s.idservicio || s.idservicio) === idservicio.value)
+  const serv = props.servicios.find(s => s.idservicio === idservicio.value)
   if (!serv) return false
 
-  const nombreNormalizado = (serv.nombre_servicio || serv.nombre || '').toLowerCase()
+  const nombreNormalizado = (serv.nombre_servicio || '').toLowerCase()
   return nombreNormalizado.includes('fisioterapia') || nombreNormalizado.includes('sesion')
 })
 
-// Ajusta el array de sesiones según la cantidad ingresada
 watch(cantidadSesiones, (nuevaCantidad) => {
-  const cant = Math.max(1, Math.min(20, nuevaCantidad || 1)) // Límite de seguridad
+  const cant = Math.max(1, Math.min(20, nuevaCantidad || 1))
   const diff = cant - sesiones.value.length
 
   if (diff > 0) {
-    // Agregar nuevas filas
-    for (let i = 0; i < diff; i++) {
-      sesiones.value.push({ fecha: '', hora: '', slots: [], loading: false })
-    }
+    for (let i = 0; i < diff; i++) sesiones.value.push({ fecha: '', hora: '', slots: [], loading: false })
   } else if (diff < 0) {
-    // Eliminar filas excedentes
     sesiones.value.splice(cant)
   }
 })
 
-// Si cambia el servicio y ya NO es fisioterapia, reseteamos a 1 sola sesión
 watch(esSesionFisioterapia, (esFisio) => {
   if (!esFisio) cantidadSesiones.value = 1
 })
 
-// Duración del servicio seleccionado
 const duracionServicio = computed(() => {
   if (!idservicio.value) return 20
-  return props.servicios.find(s => (s.idservicio || s.idservicio) === idservicio.value)?.duracion_estimada_minutos ?? 20
+  return props.servicios.find(s => s.idservicio === idservicio.value)?.duracion_estimada_minutos ?? 20
 })
 
 // ── Búsqueda de Horarios (Slots) por Fila ────────────────────────────────────
-
-// Función auxiliar para saber si una fecha es domingo
 const isDomingo = (fechaString) => {
   if (!fechaString) return false
   const [y, m, d] = fechaString.split('-')
   return new Date(Number(y), Number(m) - 1, Number(d)).getDay() === 0
 }
 
-// Obtener slots independientes para una fila específica
 const fetchSlotsForRow = async (index) => {
   const row = sesiones.value[index]
 
-  if (!idFisioterapeuta.value || !row.fecha || isDomingo(row.fecha)) {
+  if (!idfisioterapeuta.value || !row.fecha || isDomingo(row.fecha)) {
     row.slots = []
     row.hora = ''
     return
@@ -100,13 +79,12 @@ const fetchSlotsForRow = async (index) => {
 
   row.loading = true
   try {
-    row.slots = await props.obtenerSlots(idFisioterapeuta.value, row.fecha, duracionServicio.value)
+    row.slots = await props.obtenerSlots(idfisioterapeuta.value, row.fecha, duracionServicio.value)
   } finally {
     row.loading = false
   }
 }
 
-// Filtra slots pasados si la fecha de la fila es "hoy"
 const getSlotsFiltrados = (index) => {
   const row = sesiones.value[index]
   if (row.loading || !row.slots.length) return row.slots
@@ -117,15 +95,13 @@ const getSlotsFiltrados = (index) => {
   if (row.fecha !== hoyPeru) return row.slots
 
   const [hh, mm] = horaPeru.split(':').map(Number)
-
   return row.slots.filter(slot => {
     const [h, m] = slot.split(':').map(Number)
     return h > hh || (h === hh && m > mm)
   })
 }
 
-// Si cambia el fisioterapeuta, recargamos los slots de todas las fechas ingresadas
-watch(idFisioterapeuta, (val) => {
+watch(idfisioterapeuta, (val) => {
   if (val) {
     emit('fisio-changed', val)
     sesiones.value.forEach((_, i) => fetchSlotsForRow(i))
@@ -134,7 +110,6 @@ watch(idFisioterapeuta, (val) => {
 
 // ── Búsqueda dinámica de Pacientes ───────────────────────────────────────────
 let timerBusqueda = null
-
 const onInputBusqueda = (valor) => {
   terminoBusqueda.value = valor
   pacienteSeleccionado.value = null
@@ -160,8 +135,7 @@ const onInputBusqueda = (valor) => {
 const seleccionarPaciente = (p) => {
   pacienteSeleccionado.value = p
   resultadosBusqueda.value = []
-  const nombre = `${p.persona?.nombres ?? ''} ${p.persona?.apellidos ?? ''}`.trim()
-  terminoBusqueda.value = nombre
+  terminoBusqueda.value = `${p.persona?.nombres ?? ''} ${p.persona?.apellidos ?? ''}`.trim()
 }
 
 const limpiarPaciente = () => {
@@ -170,15 +144,13 @@ const limpiarPaciente = () => {
   resultadosBusqueda.value = []
 }
 
-// Auto-selecciona el primer servicio
 watch(() => props.servicios, (lista) => {
   if (lista?.length && !idservicio.value) {
     idservicio.value = lista[0].idservicio
   }
 }, { immediate: true })
 
-
-// ── Reseteo del formulario ───────────────────────────────────────────────────
+// ── Reseteo y Envío ───────────────────────────────────────────────────────────
 watch(() => props.isOpen, (abierto) => {
   if (abierto) resetForm()
 })
@@ -188,41 +160,35 @@ const resetForm = () => {
   terminoBusqueda.value = ''
   resultadosBusqueda.value = []
   pacienteSeleccionado.value = null
-  idFisioterapeuta.value = null
-  idservicio.value = props.servicios?.[0]?.idservicio || props.servicios?.[0]?.idservicio || null
+  idfisioterapeuta.value = null
+  idservicio.value = props.servicios?.[0]?.idservicio || null
   motivoConsulta.value = ''
-
-  // Resetear la lógica de sesiones
   cantidadSesiones.value = 1
   sesiones.value = [{ fecha: '', hora: '', slots: [], loading: false }]
 }
 
-// ── Envío ────────────────────────────────────────────────────────────────────
 const handleSubmit = () => {
   if (!pacienteSeleccionado.value || !formularioValido.value) return
 
-  // Creamos un array con todas las citas configuradas en las filas
   const payloadCitas = sesiones.value.map(sesion => ({
-    idpaciente: pacienteSeleccionado.value.idpaciente ?? pacienteSeleccionado.value.idPaciente,
-    idfisioterapeuta: idFisioterapeuta.value,
+    idpaciente: pacienteSeleccionado.value.idpaciente,
+    idfisioterapeuta: idfisioterapeuta.value,
     idservicio: idservicio.value,
     fecha_hora: `${sesion.fecha}T${sesion.hora}:00-05:00`,
     motivo_consulta: motivoConsulta.value || null,
   }))
 
-  // Emitimos un ARRAY de citas. El componente padre deberá procesarlas iterativamente.
   emit('submit', payloadCitas)
 }
 
-// ── Helpers de display ───────────────────────────────────────────────────────
+// ── Helpers y Validaciones ────────────────────────────────────────────────────
 const labelBusqueda = computed(() => tipoBusqueda.value === 'estudiante' ? 'Código universitario' : 'Número de DNI')
 const placeholderBusqueda = computed(() => tipoBusqueda.value === 'estudiante' ? 'Ej: 20201234A' : 'Ej: 12345678')
 
 const nombreFisio = (f) => {
   if (!f) return ''
-  const persona = f.persona ?? f.Persona ?? {}
-  return `${persona?.nombres ?? ''} ${persona?.apellidos ?? ''}`.trim() +
-    (f.especialidad ? ` — ${f.especialidad}` : '')
+  const persona = f.persona ?? {}
+  return `${persona?.nombres ?? ''} ${persona?.apellidos ?? ''}`.trim() + (f.especialidad ? ` — ${f.especialidad}` : '')
 }
 
 const labelTipoBusqueda = (id) => TIPOS_USUARIO.find(t => t.id === id)?.label ?? id
@@ -234,19 +200,9 @@ const labelResultado = (p) => {
     : { principal: nombre, secundario: `DNI: ${p.persona?.numero_documento} · ${p.facultad_escuela}` }
 }
 
-// ── Validación del botón de envío ────────────────────────────────────────────
-// El form es válido si el paciente y fisio están elegidos, y TODAS las filas tienen fecha, hora y no son domingo.
 const formularioValido = computed(() => {
-  if (!pacienteSeleccionado.value || !idFisioterapeuta.value) return false
-
+  if (!pacienteSeleccionado.value || !idfisioterapeuta.value) return false
   return sesiones.value.every(s => s.fecha && s.hora && !isDomingo(s.fecha))
-})
-
-watch(pacienteSeleccionado, (p) => {
-  if (!p) return emit('reset-saldo')
-  const id = p.idpaciente ?? p.idPaciente ?? p.id
-  if (props.onFetchSaldoPaciente && id) props.onFetchSaldoPaciente(id)
-  if (props.onFetchEvaluaciones && id) props.onFetchEvaluaciones(id)
 })
 </script>
 
@@ -254,7 +210,6 @@ watch(pacienteSeleccionado, (p) => {
   <Transition name="fade-modal">
     <div v-if="isOpen" class="modal-overlay" @click.self="emit('close')">
       <div class="modal-window modal-cita">
-
         <div class="modal-header">
           <h3>Registrar Nueva Cita</h3>
           <button class="close-x" @click="emit('close')" :disabled="loadingAccion">&times;</button>
@@ -262,10 +217,8 @@ watch(pacienteSeleccionado, (p) => {
 
         <form @submit.prevent="handleSubmit" class="modal-form" novalidate>
 
-          <!-- ── Sección 1: Paciente ─────────────────────────────────────── -->
           <div class="form-section">
             <p class="section-label">1. Paciente</p>
-
             <div class="input-group">
               <label>Tipo de usuario <span class="req">*</span></label>
               <div class="tipo-usuario-grid">
@@ -279,7 +232,6 @@ watch(pacienteSeleccionado, (p) => {
             <Transition name="slide-input">
               <div v-if="tipoBusqueda" class="input-group" style="position: relative;">
                 <label>{{ labelBusqueda }} <span class="req">*</span></label>
-
                 <div v-if="pacienteSeleccionado" class="paciente-chip">
                   <div class="chip-info">
                     <span class="chip-nombre">
@@ -287,20 +239,17 @@ watch(pacienteSeleccionado, (p) => {
                     </span>
                     <span class="chip-detalle">
                       {{ labelTipoBusqueda(tipoBusqueda) }} ·
-                      {{ tipoBusqueda === 'estudiante' ? pacienteSeleccionado.codigo_universitario :
-                        pacienteSeleccionado.persona?.numero_documento }}
+                      {{ tipoBusqueda === 'estudiante' ? pacienteSeleccionado.codigo_universitario : pacienteSeleccionado.persona?.numero_documento }}
                       · {{ pacienteSeleccionado.facultad_escuela }}
                     </span>
                   </div>
-                  <button type="button" class="chip-clear" @click="limpiarPaciente"
-                    title="Cambiar paciente">&times;</button>
+                  <button type="button" class="chip-clear" @click="limpiarPaciente" title="Cambiar paciente">&times;</button>
                 </div>
 
                 <template v-else>
                   <input type="text" class="search-input" :placeholder="placeholderBusqueda" :value="terminoBusqueda"
                     @input="onInputBusqueda($event.target.value)" autocomplete="off" />
                   <span v-if="buscando" class="search-spinner">⏳</span>
-
                   <ul v-if="resultadosBusqueda.length > 0" class="options-list">
                     <li v-for="p in resultadosBusqueda" :key="p.idpaciente" @click="seleccionarPaciente(p)">
                       <div class="li-name">{{ labelResultado(p).principal }}</div>
@@ -312,72 +261,58 @@ watch(pacienteSeleccionado, (p) => {
             </Transition>
           </div>
 
-          <!-- ── Sección 2: Servicio y Fisioterapeuta ───────────────────── -->
           <div class="form-section">
             <p class="section-label">2. Servicio y especialista</p>
             <div class="form-grid">
-
               <div class="input-group">
                 <label>Servicio <span class="req">*</span></label>
                 <select v-model="idservicio" required>
                   <option :value="null" disabled>— Seleccionar servicio —</option>
-                  <option v-for="s in servicios" :key="s.idservicio" :value="s.idservicio"> <!-- 👈 Limpiado -->
+                  <option v-for="s in servicios" :key="s.idservicio" :value="s.idservicio">
                     {{ s.nombre_servicio }}
                   </option>
                 </select>
               </div>
-
               <div class="input-group">
                 <label>Fisioterapeuta <span class="req">*</span></label>
-                <select v-model="idFisioterapeuta" required>
+                <select v-model="idfisioterapeuta" required>
                   <option :value="null" disabled>— Seleccionar especialista —</option>
-                  <option v-for="f in fisios" :key="f.idFisioterapeuta ?? f.idfisioterapeuta"
-                    :value="f.idFisioterapeuta ?? f.idfisioterapeuta">
+                  <option v-for="f in fisios" :key="f.idfisioterapeuta" :value="f.idfisioterapeuta">
                     {{ nombreFisio(f) }}
                   </option>
                 </select>
               </div>
 
-              <!-- Input dinámico de Cantidad (solo visible si es Fisioterapia) -->
               <div v-if="esSesionFisioterapia" class="input-group" style="grid-column: 1 / -1;">
                 <label>Cantidad de sesiones <span class="req">*</span></label>
                 <input type="number" v-model.number="cantidadSesiones" min="1" max="20" required />
                 <p class="field-hint">Se configurarán los horarios individualmente por sesión.</p>
               </div>
-
             </div>
           </div>
 
-          <!-- ── Sección 3: Fechas y Horarios (Dinámicos) ───────────────── -->
           <div class="form-section">
             <p class="section-label">3. Agenda de citas</p>
-
             <div v-for="(sesion, index) in sesiones" :key="index" class="sesion-row"
               style="margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px dashed #eee;">
               <h4 v-if="sesiones.length > 1" style="margin-bottom: 0.8rem; color: #555;">📍 Sesión {{ index + 1 }}</h4>
-
               <div class="form-grid">
                 <div class="input-group">
                   <label>Fecha <span class="req">*</span></label>
-                  <input type="date" v-model="sesion.fecha" :min="fechaMin" @change="fetchSlotsForRow(index)"
-                    required />
-                  <p v-if="isDomingo(sesion.fecha)" class="field-hint warn">
-                    ⚠️ El tópico no atiende los domingos.
-                  </p>
+                  <input type="date" v-model="sesion.fecha" :min="fechaMin" @change="fetchSlotsForRow(index)" required />
+                  <p v-if="isDomingo(sesion.fecha)" class="field-hint warn">⚠️ El tópico no atiende los domingos.</p>
                 </div>
-
                 <div class="input-group">
                   <label>Horario disponible <span class="req">*</span></label>
                   <select v-model="sesion.hora" required
-                    :disabled="!sesion.fecha || !idFisioterapeuta || sesion.loading || isDomingo(sesion.fecha)">
+                    :disabled="!sesion.fecha || !idfisioterapeuta || sesion.loading || isDomingo(sesion.fecha)">
                     <option value="" disabled>
                       {{
                         sesion.loading ? 'Buscando turnos libres...' :
                           isDomingo(sesion.fecha) ? '❌ Día no disponible' :
-                            !idFisioterapeuta ? '⚠️ Selecciona especialista' :
+                            !idfisioterapeuta ? '⚠️ Selecciona especialista' :
                               !sesion.fecha ? '⚠️ Selecciona una fecha' :
-                                getSlotsFiltrados(index).length === 0 ? '❌ Sin turnos' :
-                                  '— Seleccionar hora —'
+                                getSlotsFiltrados(index).length === 0 ? '❌ Sin turnos' : '— Seleccionar hora —'
                       }}
                     </option>
                     <option v-for="slot in getSlotsFiltrados(index)" :key="slot" :value="slot">
@@ -389,7 +324,6 @@ watch(pacienteSeleccionado, (p) => {
             </div>
           </div>
 
-          <!-- ── Sección 4: Motivo ──────────────────────────────────────── -->
           <div class="form-section">
             <p class="section-label">4. Motivo de consulta (opcional)</p>
             <div class="input-group">
@@ -400,19 +334,18 @@ watch(pacienteSeleccionado, (p) => {
           </div>
 
           <div class="modal-actions">
-            <button type="button" class="btn-secondary" @click="emit('close')"
-              :disabled="loadingAccion">Cancelar</button>
+            <button type="button" class="btn-secondary" @click="emit('close')" :disabled="loadingAccion">Cancelar</button>
             <button type="submit" class="btn-primary-submit" :disabled="loadingAccion || !formularioValido">
               <span v-if="loadingAccion" class="btn-spinner"></span>
               <span v-else>{{ sesiones.length > 1 ? `Registrar ${sesiones.length} Citas` : 'Registrar Cita' }}</span>
             </button>
           </div>
-
         </form>
       </div>
     </div>
   </Transition>
 </template>
+
 <style scoped>
 .modal-cita {
   max-width: 580px;

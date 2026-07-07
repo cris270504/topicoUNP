@@ -4,65 +4,39 @@ import { useRouter } from 'vue-router'
 import { useCitas, ESTADOS_CITA } from '@/composables/useCitas'
 import { useAlert } from '@/composables/useAlert'
 import { supabase } from '@/lib/supabaseClient'
-import { getTodayISO, getDateISO } from '@/lib/dateUtils'
+import { getTodayISO } from '@/lib/dateUtils'
 import ModalNuevaCita from '@/components/ModalNuevaCita.vue'
 import ModalReprogramarCita from '@/components/ModalReprogramarCita.vue'
 
 const router = useRouter()
 
-
 const {
   citas, fisios, loading, loadingAccion,
-  esFisioterapeuta, esPaciente, puedeGestionar,
-  initUser, fetchCitas, fetchFisios,
+  esFisioterapeuta, esPaciente, puedeGestionar, servicios,
+  initUser, fetchCitas, fetchFisios, fetchServicios,
   buscarPacientePorCodigo, buscarPacientePorDNI,
   crearCita, registrarCheckIn, cancelarCita, marcarAusente,
   confirmarCita, formatFechaHora, getEstadoInfo, nombreCompleto,
 } = useCitas()
 
-// Stubs para funciones pendientes de implementación
-const obtenerSlotsDisponibles = async (
-  idFisioterapeuta,
-  fecha,
-  duracion
-) => {
-
+// Stubs temporales
+const obtenerSlotsDisponibles = async (idFisioterapeuta, fecha, duracion) => {
   const slots = []
-
   for (let h = 8; h < 18; h++) {
     slots.push(`${String(h).padStart(2, '0')}:00`)
     slots.push(`${String(h).padStart(2, '0')}:30`)
   }
-
   return slots
 }
-const fetchHorarioFisio = async () => { }
 
 const { showAlert, showConfirm } = useAlert()
 
-
 const columnas = computed(() => {
   const base = ['paciente', 'fisioterapeuta', 'fecha', 'estado', 'acciones']
-
-  if (esPaciente.value) {
-    return base.filter(c => c !== 'acciones')
-  }
-
+  if (esPaciente.value) return base.filter(c => c !== 'acciones')
   return base
 })
 
-const servicios = ref([])
-const fetchServicios = async () => {
-  const { data, error } = await supabase
-    .from('servicio_topico')
-    .select('*')
-    .eq('activo', true)
-    .order('nombre_servicio')
-
-  if (!error) {
-    servicios.value = data || []
-  }
-}
 
 const viewMode = ref('list')
 const showModalNueva = ref(false)
@@ -81,9 +55,15 @@ const tituloVista = computed(() => esPaciente.value ? 'Mis Citas' : esFisioterap
 const subtituloVista = computed(() => esPaciente.value ? 'Estado de tus citas.' : esFisioterapeuta.value ? 'Tus turnos asignados.' : 'Gestión y reservas.')
 const mesActualNombre = computed(() => new Intl.DateTimeFormat('es-PE', { month: 'long', year: 'numeric' }).format(calDate.value))
 
-// Agrega esto en tu <script setup>, cerca de tus otras funciones "handle..."
-const handleNuevaCita = async (payload) => {
-  if (await crearCita(payload)) {
+// Procesador del array de citas (Multi-sesión)
+const handleNuevaCita = async (payloadArray) => {
+  let tieneErrores = false
+  for (const cita of payloadArray) {
+    const exito = await crearCita(cita)
+    if (!exito) tieneErrores = true
+  }
+  
+  if (!tieneErrores) {
     showModalNueva.value = false
     await cargarCitas()
   }
@@ -110,13 +90,12 @@ const citasDelDia = (dia) => {
 }
 
 const formatSoloHora = (iso) => new Intl.DateTimeFormat('es-PE', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
-const nombrePacienteFlat = (sesion) => `${sesion?.paciente_nombres || ''} ${sesion?.paciente_apellidos || ''}`.trim() || '—';
-const nombreFisioFlat = (sesion) => `${sesion?.fisio_nombres || ''} ${sesion?.fisio_apellidos || ''}`.trim() || '—';
-const celularPacienteFlat = (sesion) => `${sesion?.paciente_celular || ''}`.trim() || '—';
+const nombrePacienteFlat = (sesion) => `${sesion?.paciente?.persona?.nombres || ''} ${sesion?.paciente?.persona?.apellidos || ''}`.trim() || '—';
+const nombreFisioFlat = (sesion) => `${sesion?.fisioterapeuta?.persona?.nombres || ''} ${sesion?.fisioterapeuta?.persona?.apellidos || ''}`.trim() || '—';
+const celularPacienteFlat = (sesion) => `${sesion?.paciente?.persona?.celular || ''}`.trim() || '—';
 
 onMounted(async () => {
   await initUser()
-
   await Promise.all([
     fetchServicios(),
     fetchFisios(),
@@ -142,23 +121,18 @@ watch(viewMode, () => cargarCitas())
 
 // ── Acciones de la tabla ──────────────────────────────────────────────────────
 const abrirDetalleCalendario = (cita) => {
-  sesionSeleccionada.value = cita; // ¿Cita realmente trae el idSesion?
+  sesionSeleccionada.value = cita; 
   showModalDetalle.value = true
 }
 
 const handleCheckIn = async (sesion) => {
-  // 1. Ejecutar el check-in
   const exito = await registrarCheckIn(sesion);
-
   if (exito) {
-    // ✅ CORRECCIÓN CRÍTICA: Actualiza manualmente la reactividad
-    // Esto le dice a Vue: "este objeto cambió, vuelve a evaluar los v-if"
     sesion.paciente_en_sala = true;
-
-    // 2. Si quieres asegurar todo, recarga la lista
     await cargarCitas();
   }
 }
+
 const abrirModalCancelacion = (sesion) => {
   sesionSeleccionada.value = sesion; motivoCancelacion.value = ''; showModalCancelacion.value = true; showModalDetalle.value = false
 }
@@ -182,28 +156,29 @@ const handleConfirmarCancelacion = async () => {
     showModalCancelacion.value = false; await cargarCitas()
   }
 }
+
 const handleInasistencia = async (sesion) => {
-  if (await showConfirm(`¿Marcar inasistencia de ${sesion.paciente_nombres} ${sesion.paciente_apellidos}?`) && await marcarAusente(sesion.idcita)) await cargarCitas()
+  if (await showConfirm(`¿Marcar inasistencia del paciente seleccionado?`) && await marcarAusente(sesion.idcita)) await cargarCitas()
 }
+
 const abrirModalNueva = async () => {
   showModalNueva.value = true
 }
 
-
 const verHistorialClinico = (sesion) => {
-  if (sesion && sesion.idPaciente) {
-    router.push({ name: 'HistoriaClinica', params: { idPaciente: sesion.idPaciente } })
+  if (sesion && sesion.idpaciente) {
+    router.push({ name: 'HistoriaClinica', params: { idPaciente: sesion.idpaciente } })
   } else {
     showAlert('No se pudo identificar al paciente.', 'error')
   }
 }
 
 const handleAtender = (sesion) => {
-  router.push({ name: 'atencion', params: { idCita: sesion.idCita } })
+  router.push({ name: 'atencion', params: { idCita: sesion.idcita } })
 }
 
 const handleConfirmarAsistencia = async (sesion) => {
-  const confirmado = await showConfirm(`¿El paciente ${sesion.paciente_nombres} ${sesion.paciente_apellidos} ha confirmado su asistencia telefónicamente?`)
+  const confirmado = await showConfirm(`¿El paciente ha confirmado su asistencia telefónicamente?`)
   if (!confirmado) return
   if (await confirmarCita(sesion.idcita)) {
     await cargarCitas()
@@ -214,64 +189,40 @@ const handleConfirmarAsistencia = async (sesion) => {
 const accionesDe = (sesion) => {
   const e = sesion?.estado;
   const enSala = !!sesion?.paciente_en_sala;
-  const esMasaje = sesion?.tipo === 'masaje';
-
-  // Variables financieras que nos envía la nueva vista SQL
-  const tieneDeudaPaquete = sesion?.paquete_tiene_deuda;
-  const checkinPermitido = sesion?.puede_checkin_financiero;
-
-  const esEvaluacionSuelta = sesion?.tipo === 'evaluacion' && !sesion?.idPaquete;
-  const tieneDeudaIndividual = ['pendiente', 'parcial'].includes(sesion?.estado_pago) && !sesion?.idPaquete;
-
-  // Mostramos el botón de pago si hay alguna deuda y NO es una evaluación suelta gratis
-  const mostrarBotonPago = (tieneDeudaIndividual || (tieneDeudaPaquete && !esEvaluacionSuelta));
-
-  const yaFueReprogramada = !!(sesion?.idSesionOriginal || sesion?.id_sesion_original);
 
   return {
-    puedeConfirmarAsistencia: puedeGestionar.value && e === 'reservada',
-
-    // 👇 EL CANDADO MAESTRO: Solo permite Check-in si la BD dice que el pago proporcional alcanza
-    puedeCheckIn: puedeGestionar.value && e === 'agendada' && !enSala && checkinPermitido,
-
-    // 👇 UN SOLO BOTÓN DE PAGO: Se muestra si hay deuda. 
-    // Además, si el Check-in está bloqueado por falta de pago, este botón es su única salida.
-    puedeConfirmarPago: puedeGestionar.value && ['reservada', 'agendada', 'atendida'].includes(e) && mostrarBotonPago,
-
-    puedeInasistencia: puedeGestionar.value && e === 'agendada' && !enSala,
-    puedeAtender: esFisioterapeuta.value && e === 'agendada' && enSala && !tieneDeudaIndividual,
-    puedeReprogramar: puedeGestionar.value && ['reservada', 'agendada'].includes(e) && !yaFueReprogramada && !enSala,
-    puedeCancelar: puedeGestionar.value && ['reservada', 'agendada'].includes(e) && !enSala,
-    puedeVerRegistro: e === 'atendida',
-    puedeAgregarSesiones: puedeGestionar.value && e === 'atendida' && !esMasaje && !tratamientoConcluido,
+    puedeConfirmarAsistencia: puedeGestionar.value && e === 'pendiente',
+    puedeCheckIn: puedeGestionar.value && e === 'confirmada' && !enSala,
+    puedeInasistencia: puedeGestionar.value && ['pendiente', 'confirmada'].includes(e) && !enSala,
+    // Permite atender si está en triaje o ya en consulta
+    puedeAtender: esFisioterapeuta.value && ['en_triaje', 'en_consulta'].includes(e),
+    puedeReprogramar: puedeGestionar.value && ['pendiente', 'confirmada'].includes(e) && !enSala,
+    puedeCancelar: puedeGestionar.value && ['pendiente', 'confirmada'].includes(e) && !enSala,
+    puedeVerRegistro: e === 'completada',
   }
 }
 
-// Estados para el nuevo modal de lectura
+// Estados para el modal de lectura
 const showModalRegistro = ref(false)
 const registroSeleccionado = ref(null)
 const loadingRegistro = ref(false)
 
-// Función para ver lo que escribió el fisio en esa cita específica
 const verRegistroSesion = async (sesion) => {
   loadingRegistro.value = true;
-  showModalDetalle.value = false; // Cerramos detalle si estuviera abierto
+  showModalDetalle.value = false;
   showModalRegistro.value = true;
 
   try {
-    // Consultamos los apuntes clínicos de esa sesión exacta
     const { data, error } = await supabase
       .from('Sesion')
-      .select('notas_evolucion, indicaciones, evolucion_clinica, es_evaluacion_inicial')
-      .eq('idSesion', sesion.idSesion)
+      .select('sintomas, diagnostico_descripcion, tratamiento_recetado, observaciones_internas')
+      .eq('idcita', sesion.idcita)
       .single();
 
     if (error) throw error;
-
-    // Fusionamos los datos clínicos con los datos básicos de la sesión
     registroSeleccionado.value = { ...sesion, ...data };
   } catch (err) {
-    showAlert('No se pudieron cargar los apuntes clínicos.', 'error');
+    showAlert('No se pudieron cargar los apuntes clínicos de la sesión.', 'error');
     showModalRegistro.value = false;
   } finally {
     loadingRegistro.value = false;
@@ -279,22 +230,16 @@ const verRegistroSesion = async (sesion) => {
 }
 
 const obtenerSituacionCita = (sesion) => {
-  // 1. Evaluación Inicial
-  if (sesion.tipo === 'evaluacion') return { label: 'Evaluación Inicial', color: '#0f766e' };
-
-  // 2. Si es tratamiento, diferenciamos si es la primera o de seguimiento
-  // Asumimos que si numero_sesion es 1, es la primera sesión de tratamiento
-  if (sesion.numero_sesion === 1) return { label: 'Primera Sesión', color: '#2563eb' };
-
-  // 3. Si no es ninguna de las anteriores, es seguimiento
-  return { label: 'Sesión de Seguimiento', color: '#64748b' };
+  const nombreSrv = (sesion.servicio_topico?.nombre_servicio || '').toLowerCase();
+  if (nombreSrv.includes('evaluación') || nombreSrv.includes('evaluacion')) {
+    return { label: 'Evaluación Inicial', color: '#0f766e' };
+  }
+  return { label: 'Consulta / Sesión', color: '#64748b' };
 };
-
 </script>
 
 <template>
   <div class="view-container">
-
     <div class="action-header">
       <div class="header-text">
         <h2>{{ tituloVista }}</h2>
@@ -304,15 +249,12 @@ const obtenerSituacionCita = (sesion) => {
       <div class="header-actions-group">
         <div class="view-switch">
           <button type="button" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">Lista</button>
-          <button type="button" :class="{ active: viewMode === 'calendar' }" @click="viewMode = 'calendar'">
-            Calendario</button>
+          <button type="button" :class="{ active: viewMode === 'calendar' }" @click="viewMode = 'calendar'">Calendario</button>
         </div>
 
         <button v-if="puedeGestionar" class="primary-btn" @click="abrirModalNueva">
           <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
-              clip-rule="evenodd" />
+            <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
           </svg>
           Nueva Cita
         </button>
@@ -335,8 +277,9 @@ const obtenerSituacionCita = (sesion) => {
           <label>Fisioterapeuta</label>
           <select v-model="filtroFisio" @change="cargarCitas">
             <option value="">Todos</option>
-            <option v-for="f in fisios" :key="f.idfisioterapeuta" :value="f.idfisioterapeuta">{{ f.persona?.nombres }}
-              {{ f.persona?.apellidos }}</option>
+            <option v-for="f in fisios" :key="f.idfisioterapeuta" :value="f.idfisioterapeuta">
+              {{ f.persona?.nombres }} {{ f.persona?.apellidos }}
+            </option>
           </select>
         </div>
       </div>
@@ -355,61 +298,41 @@ const obtenerSituacionCita = (sesion) => {
             </thead>
             <tbody>
               <tr v-if="loading">
-                <td :colspan="columnas.length" class="empty-row"><span class="spinner"
-                    style="display:inline-block; margin-right:8px"></span> Cargando citas...</td>
+                <td :colspan="columnas.length" class="empty-row"><span class="spinner" style="display:inline-block; margin-right:8px"></span> Cargando citas...</td>
               </tr>
               <tr v-else-if="citas.length === 0">
                 <td :colspan="columnas.length" class="empty-row">No hay citas para los filtros.</td>
               </tr>
-              <tr v-else v-for="sesion in citas" :key="sesion.idcita"">
+              <tr v-else v-for="sesion in citas" :key="sesion.idcita">
                 <td v-if="columnas.includes('paciente')">
                   <span class="patient-name">{{ nombrePacienteFlat(sesion) }}</span>
-                  <span v-if="sesion.paciente_celular" class="patient-detail">{{ sesion.paciente_celular }}</span>
-
-                  <div v-if="sesion.idTratamiento" class="tratamiento-pill"
-                    :style="`color: ${getColorTratamiento(sesion.idTratamiento)}; border-color: ${getColorTratamiento(sesion.idTratamiento)}40; background-color: ${getColorTratamiento(sesion.idTratamiento)}15`">
-                    🔗 Ciclo #{{ sesion.idTratamiento }}
-                  </div>
+                  <span v-if="celularPacienteFlat(sesion) !== '—'" class="patient-detail">{{ celularPacienteFlat(sesion) }}</span>
                 </td>
-
                 <td v-if="columnas.includes('fisioterapeuta')">
                   <span class="staff-name">{{ nombreFisioFlat(sesion) }}</span>
-                  <span class="staff-detail">{{ sesion.fisio_especialidad }}</span>
+                  <span class="staff-detail">{{ sesion.fisioterapeuta?.especialidad }}</span>
                 </td>
                 <td>
                   <span class="fecha-hora">{{ formatFechaHora(sesion.fecha_hora) }}</span>
-                  <span v-if="sesion.paciente_en_sala && sesion.estado !== 'atendida'" class="sala-badge">🟢 En
-                    sala</span>
+                  <span v-if="sesion.paciente_en_sala && sesion.estado !== 'completada'" class="sala-badge" style="margin-left:8px;">🟢 En sala</span>
                   <span class="situacion-badge" :style="{ color: obtenerSituacionCita(sesion).color }">
                     {{ obtenerSituacionCita(sesion).label }}
                   </span>
                 </td>
                 <td>
-                  <span class="estado-badge"
-                    :style="`color:${getEstadoInfo(sesion.estado).color}; background:${getEstadoInfo(sesion.estado).bg}`">
+                  <span class="estado-badge" :style="`color:${getEstadoInfo(sesion.estado).color}; background:${getEstadoInfo(sesion.estado).bg}`">
                     {{ getEstadoInfo(sesion.estado).label }}
                   </span>
                 </td>
                 <td v-if="columnas.includes('acciones')">
                   <div class="acciones-cell">
-                    <button v-if="accionesDe(sesion).puedeAtender" class="accion-btn atender"
-                      @click="handleAtender(sesion)">🩺 Atender</button>
-                    <button v-if="accionesDe(sesion).puedeVerRegistro" class="accion-btn historial"
-                      @click="verRegistroSesion(sesion)">
-                      📄 Ver Registro
-                    </button>
-
-                    <button v-if="accionesDe(sesion).puedeConfirmarAsistencia" class="accion-btn confirmar"
-                      @click="handleConfirmarAsistencia(sesion)" :disabled="loadingAccion"
-                      title="Confirmar asistencia por teléfono">📞 Confirmar</button>
-                    <button v-if="accionesDe(sesion).puedeCheckIn" class="accion-btn checkin"
-                      @click="handleCheckIn(sesion)" :disabled="loadingAccion">✅ Check-in</button>
-                    <button v-if="accionesDe(sesion).puedeInasistencia" class="accion-btn inasistencia"
-                      @click="handleInasistencia(sesion)" :disabled="loadingAccion">❌ Faltó</button>
-                    <button v-if="accionesDe(sesion).puedeReprogramar" class="accion-btn reprogramar"
-                      @click="abrirModalReprogramar(sesion)">🔄 Reprogramar</button>
-                    <button v-if="accionesDe(sesion).puedeCancelar" class="accion-btn cancelar"
-                      @click="abrirModalCancelacion(sesion)" :disabled="loadingAccion">🗑 Cancelar</button>
+                    <button v-if="accionesDe(sesion).puedeAtender" class="accion-btn atender" @click="handleAtender(sesion)">🩺 Atender</button>
+                    <button v-if="accionesDe(sesion).puedeVerRegistro" class="accion-btn historial" @click="verRegistroSesion(sesion)">📄 Ver Registro</button>
+                    <button v-if="accionesDe(sesion).puedeConfirmarAsistencia" class="accion-btn confirmar" @click="handleConfirmarAsistencia(sesion)" :disabled="loadingAccion" title="Confirmar asistencia por teléfono">📞 Confirmar</button>
+                    <button v-if="accionesDe(sesion).puedeCheckIn" class="accion-btn checkin" @click="handleCheckIn(sesion)" :disabled="loadingAccion">✅ Check-in</button>
+                    <button v-if="accionesDe(sesion).puedeInasistencia" class="accion-btn inasistencia" @click="handleInasistencia(sesion)" :disabled="loadingAccion">❌ Faltó</button>
+                    <button v-if="accionesDe(sesion).puedeReprogramar" class="accion-btn reprogramar" @click="abrirModalReprogramar(sesion)">🔄 Reprogramar</button>
+                    <button v-if="accionesDe(sesion).puedeCancelar" class="accion-btn cancelar" @click="abrirModalCancelacion(sesion)" :disabled="loadingAccion">🗑 Cancelar</button>
                   </div>
                 </td>
               </tr>
@@ -422,8 +345,7 @@ const obtenerSituacionCita = (sesion) => {
     <div v-else class="data-card calendar-container">
       <div class="calendar-header">
         <button @click="prevMonth" class="btn-cal-nav" :disabled="loading">&larr;</button>
-        <h3 class="cal-month">{{ mesActualNombre }} <span v-if="loading" class="spinner"
-            style="width: 14px; height: 14px; margin-left: 8px;"></span></h3>
+        <h3 class="cal-month">{{ mesActualNombre }} <span v-if="loading" class="spinner" style="width: 14px; height: 14px; margin-left: 8px;"></span></h3>
         <button @click="nextMonth" class="btn-cal-nav" :disabled="loading">&rarr;</button>
       </div>
 
@@ -439,17 +361,10 @@ const obtenerSituacionCita = (sesion) => {
         <div v-for="(dia, index) in diasCalendario" :key="index" class="cal-cell" :class="{ empty: !dia }">
           <span v-if="dia" class="cal-date-number">{{ dia }}</span>
           <div v-if="dia" class="cal-appointments">
-            <button v-for="cita in citasDelDia(dia)" :key="cita.idSesion" class="cita-tag"
+            <button v-for="cita in citasDelDia(dia)" :key="cita.idcita" class="cita-tag"
               :style="`border-left-color: ${getEstadoInfo(cita.estado).color}`" @click="abrirDetalleCalendario(cita)">
               <span class="cita-time">{{ formatSoloHora(cita.fecha_hora) }}</span>
               <span class="cita-name">{{ nombrePacienteFlat(cita).split(' ')[0] }}</span>
-
-              <span v-if="cita.idTratamiento" class="cita-ciclo-mini"
-                :style="`color: ${getColorTratamiento(cita.idTratamiento)}; background: ${getColorTratamiento(cita.idTratamiento)}20`"
-                title="Pertenece al mismo tratamiento">
-                #{{ cita.idTratamiento }}
-              </span>
-
               <span class="situacion-dot" :style="`background: ${obtenerSituacionCita(cita).color}`"></span>
             </button>
           </div>
@@ -466,58 +381,36 @@ const obtenerSituacionCita = (sesion) => {
           </div>
           <div class="modal-form">
             <div class="detalle-info">
-              <p v-if="sesionSeleccionada.idTratamiento">
-                <strong>Tratamiento:</strong>
-                <span class="tratamiento-pill"
-                  :style="`color: ${getColorTratamiento(sesionSeleccionada.idTratamiento)}; border-color: ${getColorTratamiento(sesionSeleccionada.idTratamiento)}40; background-color: ${getColorTratamiento(sesionSeleccionada.idTratamiento)}15`">
-                  Ciclo #{{ sesionSeleccionada.idTratamiento }}
-                </span>
-              </p>
               <p><strong>Paciente:</strong> {{ nombrePacienteFlat(sesionSeleccionada) }}</p>
               <p><strong>Especialista:</strong> {{ nombreFisioFlat(sesionSeleccionada) }}</p>
               <p><strong>Fecha y Hora:</strong> {{ formatFechaHora(sesionSeleccionada.fecha_hora) }}</p>
               <p><strong>Estado:</strong>
-                <span class="estado-badge"
-                  :style="`margin-left: 6px; color:${getEstadoInfo(sesionSeleccionada.estado).color}; background:${getEstadoInfo(sesionSeleccionada.estado).bg}`">
+                <span class="estado-badge" :style="`margin-left: 6px; color:${getEstadoInfo(sesionSeleccionada.estado).color}; background:${getEstadoInfo(sesionSeleccionada.estado).bg}`">
                   {{ getEstadoInfo(sesionSeleccionada.estado).label }}
                 </span>
-                <span v-if="sesionSeleccionada.paciente_en_sala" class="sala-badge"
-                  style="display:inline-block; margin-left: 8px;">🟢 En sala</span>
+                <span v-if="sesionSeleccionada.paciente_en_sala" class="sala-badge" style="display:inline-block; margin-left: 8px;">🟢 En sala</span>
               </p>
-              <p v-if="sesionSeleccionada.observaciones"><strong>Notas:</strong> {{ sesionSeleccionada.observaciones }}
-              </p>
+              <p v-if="sesionSeleccionada.motivo_consulta"><strong>Motivo:</strong> {{ sesionSeleccionada.motivo_consulta }}</p>
             </div>
 
-            <div class="modal-actions" style="margin-top: 20px; justify-content: flex-start; flex-wrap: wrap;"
-              v-if="puedeGestionar || esFisioterapeuta">
-
-              <button v-if="accionesDe(sesionSeleccionada).puedeAtender" class="accion-btn atender"
-                @click="handleAtender(sesionSeleccionada)">🩺 Atender</button>
-
-              <button v-if="accionesDe(sesionSeleccionada).puedeVerRegistro" class="accion-btn historial"
-                @click="verRegistroSesion(sesionSeleccionada)">
-                📄 Ver Registro
-              </button>
-
-              <button v-if="accionesDe(sesionSeleccionada).puedeConfirmarAsistencia" class="accion-btn confirmar"
-                @click="handleConfirmarAsistencia(sesionSeleccionada)">📞 Confirmar</button>
-              <button v-if="accionesDe(sesionSeleccionada).puedeCheckIn" class="accion-btn checkin"
-                @click="handleCheckIn(sesionSeleccionada)">✅ Check-in</button>
-              <button v-if="accionesDe(sesionSeleccionada).puedeInasistencia" class="accion-btn inasistencia"
-                @click="handleInasistencia(sesionSeleccionada)">❌ Faltó</button>
-              <button v-if="accionesDe(sesionSeleccionada).puedeReprogramar" class="accion-btn reprogramar"
-                @click="abrirModalReprogramar(sesionSeleccionada)">🔄 Reprogramar</button>
-              <button v-if="accionesDe(sesionSeleccionada).puedeCancelar" class="accion-btn cancelar"
-                @click="abrirModalCancelacion(sesionSeleccionada)">🗑 Cancelar</button>
+            <div class="modal-actions" style="margin-top: 20px; justify-content: flex-start; flex-wrap: wrap;" v-if="puedeGestionar || esFisioterapeuta">
+              <button v-if="accionesDe(sesionSeleccionada).puedeAtender" class="accion-btn atender" @click="handleAtender(sesionSeleccionada)">🩺 Atender</button>
+              <button v-if="accionesDe(sesionSeleccionada).puedeVerRegistro" class="accion-btn historial" @click="verRegistroSesion(sesionSeleccionada)">📄 Ver Registro</button>
+              <button v-if="accionesDe(sesionSeleccionada).puedeConfirmarAsistencia" class="accion-btn confirmar" @click="handleConfirmarAsistencia(sesionSeleccionada)">📞 Confirmar</button>
+              <button v-if="accionesDe(sesionSeleccionada).puedeCheckIn" class="accion-btn checkin" @click="handleCheckIn(sesionSeleccionada)">✅ Check-in</button>
+              <button v-if="accionesDe(sesionSeleccionada).puedeInasistencia" class="accion-btn inasistencia" @click="handleInasistencia(sesionSeleccionada)">❌ Faltó</button>
+              <button v-if="accionesDe(sesionSeleccionada).puedeReprogramar" class="accion-btn reprogramar" @click="abrirModalReprogramar(sesionSeleccionada)">🔄 Reprogramar</button>
+              <button v-if="accionesDe(sesionSeleccionada).puedeCancelar" class="accion-btn cancelar" @click="abrirModalCancelacion(sesionSeleccionada)">🗑 Cancelar</button>
             </div>
           </div>
         </div>
       </div>
     </Transition>
 
-    <ModalNuevaCita :isOpen="showModalNueva" :fisios="fisios" :servicios="serviciosDisponibles" :loadingAccion="loadingAccion"
+    <ModalNuevaCita :isOpen="showModalNueva" :fisios="fisios" :servicios="servicios" :loadingAccion="loadingAccion"
       :obtenerSlots="obtenerSlotsDisponibles" :onBuscarPorCodigo="buscarPacientePorCodigo" :onBuscarPorDNI="buscarPacientePorDNI"
       @close="showModalNueva = false" @submit="handleNuevaCita" />
+      
     <ModalReprogramarCita :isOpen="showModalReprogramar" :sesion="sesionSeleccionada" :fisios="fisios"
       :loadingAccion="loadingAccion" @close="showModalReprogramar = false" @submit="handleReprogramar" />
 
@@ -540,40 +433,26 @@ const obtenerSituacionCita = (sesion) => {
               <p><strong>Atendido por:</strong> {{ nombreFisioFlat(registroSeleccionado) }}</p>
               <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 15px 0;">
 
-              <!-- Si fue una sesión de Evaluación -->
-              <div v-if="registroSeleccionado.es_evaluacion_inicial"
-                style="background: #f0fdfa; padding: 12px; border-radius: 8px; border: 1px solid #5eead4; color: #0f766e;">
-                <strong>📌 Evaluación Inicial Realizada</strong>
-                <p style="font-size: 13.5px; margin-top: 6px;">El fisioterapeuta completó la ficha estructural. Por
-                  favor, diríjase al <strong>Historial Clínico</strong> del paciente para ver el documento completo.</p>
+              <div style="margin-bottom: 16px;">
+                <strong>Síntomas registrados:</strong>
+                <p style="white-space: pre-wrap; font-size: 14px; background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0; margin-top: 4px;">
+                  {{ registroSeleccionado.sintomas || 'Sin síntomas registrados.' }}
+                </p>
               </div>
 
-              <!-- Si fue una sesión de Seguimiento normal -->
-              <div v-else>
-                <div v-if="registroSeleccionado.evolucion_clinica?.eva !== undefined" style="margin-bottom: 16px;">
-                  <strong>Evolución Rápida:</strong><br>
-                  <span
-                    style="display: inline-block; background: #f1f5f9; padding: 4px 8px; border-radius: 4px; font-size: 13px; margin-top: 4px;">
-                    Dolor EVA: {{ registroSeleccionado.evolucion_clinica.eva }}/10 | Estado: {{
-                      registroSeleccionado.evolucion_clinica.funcion }}
-                  </span>
-                </div>
-
-                <div style="margin-bottom: 16px;">
-                  <strong>Notas de Evolución:</strong>
-                  <p
-                    style="white-space: pre-wrap; font-size: 14px; background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0; margin-top: 4px;">
-                    {{ registroSeleccionado.notas_evolucion || 'Sin notas registradas.' }}</p>
-                </div>
-
-                <div>
-                  <strong>Indicaciones para casa:</strong>
-                  <p
-                    style="white-space: pre-wrap; font-size: 14px; background: #fffbeb; padding: 10px; border-radius: 6px; border: 1px solid #fde68a; margin-top: 4px;">
-                    {{ registroSeleccionado.indicaciones || 'Ninguna indicación adicional.' }}</p>
-                </div>
+              <div style="margin-bottom: 16px;">
+                <strong>Diagnóstico:</strong>
+                <p style="white-space: pre-wrap; font-size: 14px; background: #f0fdfa; padding: 10px; border-radius: 6px; border: 1px solid #5eead4; margin-top: 4px;">
+                  {{ registroSeleccionado.diagnostico_descripcion || 'Sin diagnóstico registrado.' }}
+                </p>
               </div>
 
+              <div>
+                <strong>Tratamiento Recetado:</strong>
+                <p style="white-space: pre-wrap; font-size: 14px; background: #fffbeb; padding: 10px; border-radius: 6px; border: 1px solid #fde68a; margin-top: 4px;">
+                  {{ registroSeleccionado.tratamiento_recetado || 'Ningún tratamiento recetado.' }}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -593,24 +472,22 @@ const obtenerSituacionCita = (sesion) => {
           </div>
           <div class="modal-form">
             <div class="cancelacion-info" v-if="sesionSeleccionada">
-              <div class="cancelacion-row"><span class="cancelacion-label">Paciente</span><span
-                  class="cancelacion-val">{{ nombreCompleto(sesionSeleccionada.Paciente?.Persona) }}</span></div>
-              <div class="cancelacion-row"><span class="cancelacion-label">Fecha y hora</span><span
-                  class="cancelacion-val">{{ formatFechaHora(sesionSeleccionada.fecha_hora) }}</span></div>
+              <div class="cancelacion-row"><span class="cancelacion-label">Paciente</span>
+                <span class="cancelacion-val">{{ nombrePacienteFlat(sesionSeleccionada) }}</span>
+              </div>
+              <div class="cancelacion-row"><span class="cancelacion-label">Fecha y hora</span>
+                <span class="cancelacion-val">{{ formatFechaHora(sesionSeleccionada.fecha_hora) }}</span>
+              </div>
             </div>
             <div class="input-group">
               <label>Motivo de cancelación <span class="req">*</span></label>
-              <textarea v-model="motivoCancelacion" placeholder="Describe el motivo..." rows="3"
-                maxlength="300"></textarea>
+              <textarea v-model="motivoCancelacion" placeholder="Describe el motivo..." rows="3" maxlength="300"></textarea>
               <span class="char-count">{{ motivoCancelacion.length }}/300</span>
             </div>
-            <div class="cancelacion-aviso">⚠️ Esta acción no se puede deshacer. La sesión pasará a estado "Cancelada" de
-              forma permanente.</div>
+            <div class="cancelacion-aviso">⚠️ Esta acción no se puede deshacer. La sesión pasará a estado "Cancelada" de forma permanente.</div>
             <div class="modal-actions">
-              <button type="button" class="btn-secondary" @click="showModalCancelacion = false"
-                :disabled="loadingAccion">Volver</button>
-              <button type="button" class="btn-danger" @click="handleConfirmarCancelacion"
-                :disabled="loadingAccion || !motivoCancelacion.trim()">
+              <button type="button" class="btn-secondary" @click="showModalCancelacion = false" :disabled="loadingAccion">Volver</button>
+              <button type="button" class="btn-danger" @click="handleConfirmarCancelacion" :disabled="loadingAccion || !motivoCancelacion.trim()">
                 <span v-if="loadingAccion" class="btn-spinner"></span><span v-else>Confirmar Cancelación</span>
               </button>
             </div>
