@@ -1,49 +1,43 @@
-/**
- * useCitas.js — Sistema Tópico Universitario
- *
- * Reescrito desde cero para la nueva BD:
- * - Tabla central: "cita" (no "Sesion")
- * - Sin Tratamiento, Paquete, estado_pago ni lógica de saldo
- * - Sin domingo en horarios (dia_semana 1-6)
- * - Búsqueda de paciente bifurcada:
- *     estudiante  → codigo_universitario (tabla paciente)
- *     docente / administrativo → numero_documento (tabla persona via JOIN)
- * - Rol operativo: enfermera (reemplaza a secretaria)
- * - idservicio es NOT NULL en cita → siempre obligatorio
- *
- * ESTADOS: pendiente | confirmada | en_triaje | en_consulta | completada | cancelada | ausente
- */
-
 import { ref, computed } from 'vue'
 import { supabase } from '@/lib/supabaseClient'
 import { useAlert } from '@/composables/useAlert'
 
-// ─── Constantes de negocio ────────────────────────────────────────────────────
+// ─── Constantes ───────────────────────────────────────────────────────────────
 
 export const TIPOS_USUARIO = [
-  { id: 'estudiante',      label: 'Estudiante',      campoBusqueda: 'codigo_universitario' },
-  { id: 'docente',         label: 'Docente',          campoBusqueda: 'numero_documento' },
-  { id: 'administrativo',  label: 'Administrativo',   campoBusqueda: 'numero_documento' },
+  { id: 'estudiante',     label: 'Estudiante',     campoBusqueda: 'codigo_universitario' },
+  { id: 'docente',        label: 'Docente',         campoBusqueda: 'numero_documento' },
+  { id: 'administrativo', label: 'Administrativo',  campoBusqueda: 'numero_documento' },
 ]
 
 export const ESTADOS_CITA = {
-  pendiente:    { label: 'Pendiente',    color: '#f59e0b', bg: '#fef3c7' },
-  confirmada:   { label: 'Confirmada',   color: '#10b981', bg: '#d1fae5' },
-  en_triaje:    { label: 'En triaje',    color: '#6366f1', bg: '#ede9fe' },
-  en_consulta:  { label: 'En consulta',  color: '#0ea5e9', bg: '#e0f2fe' },
-  completada:   { label: 'Completada',   color: '#3b82f6', bg: '#dbeafe' },
-  cancelada:    { label: 'Cancelada',    color: '#ef4444', bg: '#fee2e2' },
-  ausente:      { label: 'Ausente',      color: '#6b7280', bg: '#f3f4f6' },
+  pendiente:   { label: 'Pendiente',   color: '#f59e0b', bg: '#fef3c7' },
+  confirmada:  { label: 'Confirmada',  color: '#10b981', bg: '#d1fae5' },
+  en_triaje:   { label: 'En triaje',   color: '#6366f1', bg: '#ede9fe' },
+  en_consulta: { label: 'En consulta', color: '#0ea5e9', bg: '#e0f2fe' },
+  completada:  { label: 'Completada',  color: '#3b82f6', bg: '#dbeafe' },
+  cancelada:   { label: 'Cancelada',   color: '#ef4444', bg: '#fee2e2' },
+  ausente:     { label: 'Ausente',     color: '#6b7280', bg: '#f3f4f6' },
+}
+
+// Transiciones válidas de estado (para accionesDe y avanzarEstado)
+const TRANSICIONES_VALIDAS = {
+  pendiente:   ['confirmada', 'cancelada', 'ausente'],
+  confirmada:  ['en_triaje',  'cancelada', 'ausente'],
+  en_triaje:   ['en_consulta'],
+  en_consulta: ['completada'],
+  completada:  [],
+  cancelada:   [],
+  ausente:     [],
 }
 
 // ─── Composable ───────────────────────────────────────────────────────────────
 export function useCitas() {
   const { showAlert } = useAlert()
 
-  // ── Estado ──────────────────────────────────────────────────────────────────
   const citas         = ref([])
   const fisios        = ref([])
-  const servicios     = ref([])   // catálogo de servicio_topico
+  const servicios     = ref([])
   const horarios      = ref([])
   const loading       = ref(false)
   const loadingAccion = ref(false)
@@ -51,7 +45,6 @@ export function useCitas() {
   const userRole = ref(null)
   const userId   = ref(null)
 
-  // ── Computed de rol ─────────────────────────────────────────────────────────
   const esEnfermera      = computed(() => userRole.value === 'enfermera')
   const esFisioterapeuta = computed(() => userRole.value === 'fisioterapeuta')
   const esPaciente       = computed(() => userRole.value === 'paciente')
@@ -70,7 +63,6 @@ export function useCitas() {
   // ── fetchCitas ──────────────────────────────────────────────────────────────
   const fetchCitas = async (filtros = {}) => {
     if (!userId.value) await initUser()
-
     loading.value = true
     try {
       let query = supabase
@@ -84,7 +76,16 @@ export function useCitas() {
           idpaciente,
           idfisioterapeuta,
           idservicio,
-          servicio_topico ( nombre_servicio, duracion_estimada_minutos ),
+          presion_arterial,
+          peso_kg,
+          talla_cm,
+          temperatura_c,
+          frecuencia_cardiaca,
+          saturacion_oxigeno,
+          sintomas,
+          diagnostico_descripcion,
+          tratamiento_recetado,
+          servicio_topico ( idservicio, nombre_servicio, duracion_estimada_minutos ),
           paciente (
             idpaciente,
             codigo_universitario,
@@ -99,15 +100,13 @@ export function useCitas() {
           )
         `)
 
-      // Filtro por rol
       if (esPaciente.value)       query = query.eq('idpaciente', userId.value)
       if (esFisioterapeuta.value) query = query.eq('idfisioterapeuta', userId.value)
 
-      // Filtros opcionales
       if (filtros.fecha) {
-        const inicio = `${filtros.fecha}T00:00:00-05:00`
-        const fin    = `${filtros.fecha}T23:59:59-05:00`
-        query = query.gte('fecha_hora', inicio).lte('fecha_hora', fin)
+        query = query
+          .gte('fecha_hora', `${filtros.fecha}T00:00:00-05:00`)
+          .lte('fecha_hora', `${filtros.fecha}T23:59:59-05:00`)
       }
       if (filtros.rangoInicio && filtros.rangoFin) {
         query = query.gte('fecha_hora', filtros.rangoInicio).lte('fecha_hora', filtros.rangoFin)
@@ -125,24 +124,19 @@ export function useCitas() {
     }
   }
 
-  // ── Búsqueda dinámica de paciente por código universitario ──────────────────
-  // Retorna array de coincidencias mientras el usuario escribe
+  // ── Búsqueda de pacientes ───────────────────────────────────────────────────
   const buscarPacientePorCodigo = async (codigoParcial) => {
     if (!codigoParcial || codigoParcial.length < 3) return []
     try {
       const { data, error } = await supabase
         .from('paciente')
         .select(`
-          idpaciente,
-          codigo_universitario,
-          tipo_usuario,
-          facultad_escuela,
+          idpaciente, codigo_universitario, tipo_usuario, facultad_escuela,
           persona ( nombres, apellidos, celular )
         `)
         .eq('tipo_usuario', 'estudiante')
         .ilike('codigo_universitario', `%${codigoParcial}%`)
         .limit(10)
-
       if (error) throw error
       return data ?? []
     } catch (err) {
@@ -151,24 +145,18 @@ export function useCitas() {
     }
   }
 
-  // ── Búsqueda dinámica de paciente por DNI (docente / administrativo) ────────
   const buscarPacientePorDNI = async (dniParcial, tipoUsuario) => {
     if (!dniParcial || dniParcial.length < 4) return []
     try {
-      // Join inverso: persona → paciente, filtrando por numero_documento
       const { data, error } = await supabase
         .from('paciente')
         .select(`
-          idpaciente,
-          codigo_universitario,
-          tipo_usuario,
-          facultad_escuela,
+          idpaciente, codigo_universitario, tipo_usuario, facultad_escuela,
           persona!inner ( idpersona, nombres, apellidos, celular, numero_documento )
         `)
         .eq('tipo_usuario', tipoUsuario)
         .ilike('persona.numero_documento', `%${dniParcial}%`)
         .limit(10)
-
       if (error) throw error
       return data ?? []
     } catch (err) {
@@ -181,27 +169,20 @@ export function useCitas() {
   const fetchFisios = async () => {
     const { data, error } = await supabase
       .from('fisioterapeuta')
-      .select(`
-        idfisioterapeuta,
-        especialidad,
-        persona ( nombres, apellidos )
-      `)
+      .select(`idfisioterapeuta, especialidad, persona ( nombres, apellidos )`)
       .eq('activo', true)
       .order('idfisioterapeuta')
-
     if (error) { showAlert('Error al cargar fisioterapeutas: ' + error.message, 'error'); return }
     fisios.value = data ?? []
   }
 
   // ── fetchServicios ──────────────────────────────────────────────────────────
-  // Carga el catálogo de servicio_topico (reemplaza al tarifario anterior)
   const fetchServicios = async () => {
     const { data, error } = await supabase
       .from('servicio_topico')
       .select('idservicio, nombre_servicio, descripcion, duracion_estimada_minutos')
       .eq('activo', true)
       .order('nombre_servicio')
-
     if (error) { showAlert('Error al cargar servicios: ' + error.message, 'error'); return }
     servicios.value = data ?? []
   }
@@ -213,22 +194,17 @@ export function useCitas() {
       .from('horario')
       .select('dia_semana, hora_inicio, hora_fin')
       .eq('idfisioterapeuta', idfisioterapeuta)
-
     if (error) { showAlert('Error al cargar horario: ' + error.message, 'error'); return }
     horarios.value = data ?? []
   }
 
   // ── obtenerSlotsDisponibles ─────────────────────────────────────────────────
-  // dia_semana 1=Lunes … 6=Sábado (NO hay domingo en esta BD)
   const obtenerSlotsDisponibles = async (idfisioterapeuta, fechaStr, duracionMinutos) => {
     if (!idfisioterapeuta || !fechaStr) return []
 
     const [yyyy, mm, dd] = fechaStr.split('-')
-    const fechaLocal = new Date(Number(yyyy), Number(mm) - 1, Number(dd))
-    let diaSemana = fechaLocal.getDay() // 0=Dom, 1=Lun … 6=Sáb
-
-    // El horario solo cubre lunes-sábado (1-6). Si es domingo retornamos vacío.
-    if (diaSemana === 0) return []
+    const diaSemana = new Date(Number(yyyy), Number(mm) - 1, Number(dd)).getDay()
+    if (diaSemana === 0) return [] // Sin domingo
 
     const { data: bloques } = await supabase
       .from('horario')
@@ -238,20 +214,16 @@ export function useCitas() {
 
     if (!bloques?.length) return []
 
-    // Citas que ya ocupan ese día (excluimos canceladas y ausentes)
-    const inicioDia = `${yyyy}-${mm}-${dd}T00:00:00-05:00`
-    const finDia    = `${yyyy}-${mm}-${dd}T23:59:59-05:00`
-
     const { data: citasDia } = await supabase
       .from('cita')
-      .select('fecha_hora, idservicio, servicio_topico ( duracion_estimada_minutos )')
+      .select('fecha_hora, servicio_topico ( duracion_estimada_minutos )')
       .eq('idfisioterapeuta', idfisioterapeuta)
-      .gte('fecha_hora', inicioDia)
-      .lte('fecha_hora', finDia)
+      .gte('fecha_hora', `${yyyy}-${mm}-${dd}T00:00:00-05:00`)
+      .lte('fecha_hora', `${yyyy}-${mm}-${dd}T23:59:59-05:00`)
       .not('estado', 'in', '(cancelada,ausente)')
 
     const ocupados = (citasDia ?? []).map(c => {
-      const fc = new Date(c.fecha_hora)
+      const fc  = new Date(c.fecha_hora)
       const ini = fc.getHours() * 60 + fc.getMinutes()
       const dur = c.servicio_topico?.duracion_estimada_minutos ?? 20
       return { inicio: ini, fin: ini + dur }
@@ -263,40 +235,29 @@ export function useCitas() {
     const slots = []
     for (const bloque of bloques) {
       let actual = parseTime(bloque.hora_inicio)
-      const fin  = parseTime(bloque.hora_fin)
-
-      while (actual + duracionMinutos <= fin) {
+      const finBloque = parseTime(bloque.hora_fin)
+      while (actual + duracionMinutos <= finBloque) {
         const finActual = actual + duracionMinutos
         const choque = ocupados.find(o => actual < o.fin && finActual > o.inicio)
-        if (!choque) {
-          slots.push(formatTime(actual))
-          actual += duracionMinutos
-        } else {
-          actual = choque.fin
-        }
+        if (!choque) { slots.push(formatTime(actual)); actual += duracionMinutos }
+        else actual = choque.fin
       }
     }
     return slots
   }
 
   // ── crearCita ───────────────────────────────────────────────────────────────
+  // [E1] CORREGIDO: idservicio ahora se incluye en el INSERT
   const crearCita = async (payload) => {
-    const {
-      idpaciente,
-      idfisioterapeuta,
-      idservicio,
-      fecha_hora,
-      motivo_consulta = null,
-    } = payload
+    const { idpaciente, idfisioterapeuta, idservicio, fecha_hora, motivo_consulta = null } = payload
 
     if (!idpaciente)       { showAlert('Debe seleccionar un paciente.', 'error');       return false }
     if (!idfisioterapeuta) { showAlert('Debe seleccionar un fisioterapeuta.', 'error'); return false }
-    if (!fecha_hora)       { showAlert('Debe seleccionar fecha y hora.', 'error');       return false }
+    if (!idservicio)       { showAlert('Debe seleccionar un servicio.', 'error');       return false }
+    if (!fecha_hora)       { showAlert('Debe seleccionar fecha y hora.', 'error');      return false }
 
-    // Verificar disponibilidad antes de insertar
-    const duracion = 30
-    const ocupado = await verificarDisponibilidad(idfisioterapeuta, fecha_hora, duracion)
-    if (ocupado) {
+    const duracion = servicios.value.find(s => s.idservicio === idservicio)?.duracion_estimada_minutos ?? 20
+    if (await verificarDisponibilidad(idfisioterapeuta, fecha_hora, duracion)) {
       showAlert('Ese horario ya está ocupado para el fisioterapeuta seleccionado.', 'error')
       return false
     }
@@ -308,19 +269,36 @@ export function useCitas() {
         .insert({
           idpaciente,
           idfisioterapeuta,
+          idservicio,        // ← [E1] campo obligatorio que faltaba
           fecha_hora,
           motivo_consulta: motivo_consulta?.trim() || null,
           estado: 'pendiente',
         })
         .select()
         .single()
-
       if (error) throw error
       showAlert('✅ Cita registrada exitosamente.', 'success')
       return data
-
     } catch (err) {
       showAlert('Error al registrar la cita: ' + err.message, 'error')
+      return false
+    } finally {
+      loadingAccion.value = false
+    }
+  }
+
+  // ── confirmarCita ───────────────────────────────────────────────────────────
+  const confirmarCita = async (idcita) => {
+    loadingAccion.value = true
+    try {
+      const { error } = await supabase
+        .from('cita').update({ estado: 'confirmada' })
+        .eq('idcita', idcita).eq('estado', 'pendiente')
+      if (error) throw error
+      showAlert('✅ Cita confirmada.', 'success')
+      return true
+    } catch (err) {
+      showAlert('Error al confirmar: ' + err.message, 'error')
       return false
     } finally {
       loadingAccion.value = false
@@ -333,11 +311,8 @@ export function useCitas() {
     loadingAccion.value = true
     try {
       const { error } = await supabase
-        .from('cita')
-        .update({ paciente_en_sala: true, estado: 'en_triaje' })
-        .eq('idcita', cita.idcita)
-        .eq('estado', 'confirmada')  // solo se puede hacer check-in si está confirmada
-
+        .from('cita').update({ paciente_en_sala: true, estado: 'en_triaje' })
+        .eq('idcita', cita.idcita).eq('estado', 'confirmada')
       if (error) throw error
       Object.assign(cita, { paciente_en_sala: true, estado: 'en_triaje' })
       showAlert('✅ Paciente registrado en tópico.', 'success')
@@ -350,22 +325,24 @@ export function useCitas() {
     }
   }
 
-  // ── confirmarCita ───────────────────────────────────────────────────────────
-  // Cambia de 'pendiente' → 'confirmada' (confirmación telefónica / presencial)
-  const confirmarCita = async (idcita) => {
+  // ── avanzarEstado ───────────────────────────────────────────────────────────
+  // [UX5] NUEVO: en_triaje → en_consulta → completada
+  const avanzarEstado = async (cita) => {
+    const siguientes = TRANSICIONES_VALIDAS[cita?.estado] ?? []
+    const siguiente  = siguientes[0] // primera transición válida
+    if (!siguiente) { showAlert('No hay transición disponible desde este estado.', 'error'); return false }
+
     loadingAccion.value = true
     try {
       const { error } = await supabase
-        .from('cita')
-        .update({ estado: 'confirmada' })
-        .eq('idcita', idcita)
-        .eq('estado', 'pendiente')
-
+        .from('cita').update({ estado: siguiente })
+        .eq('idcita', cita.idcita)
       if (error) throw error
-      showAlert('✅ Cita confirmada.', 'success')
+      Object.assign(cita, { estado: siguiente })
+      showAlert(`✅ Estado actualizado a: ${ESTADOS_CITA[siguiente]?.label}.`, 'success')
       return true
     } catch (err) {
-      showAlert('Error al confirmar la cita: ' + err.message, 'error')
+      showAlert('Error al avanzar estado: ' + err.message, 'error')
       return false
     } finally {
       loadingAccion.value = false
@@ -382,7 +359,6 @@ export function useCitas() {
         .update({ estado: 'cancelada', motivo_consulta: motivo.trim() })
         .eq('idcita', idcita)
         .in('estado', ['pendiente', 'confirmada'])
-
       if (error) throw error
       showAlert('Cita cancelada.', 'info')
       return true
@@ -399,11 +375,8 @@ export function useCitas() {
     loadingAccion.value = true
     try {
       const { error } = await supabase
-        .from('cita')
-        .update({ estado: 'ausente' })
-        .eq('idcita', idcita)
-        .in('estado', ['confirmada', 'pendiente'])
-
+        .from('cita').update({ estado: 'ausente' })
+        .eq('idcita', idcita).in('estado', ['confirmada', 'pendiente'])
       if (error) throw error
       showAlert('Inasistencia registrada.', 'info')
       return true
@@ -417,18 +390,15 @@ export function useCitas() {
 
   // ── verificarDisponibilidad ─────────────────────────────────────────────────
   const verificarDisponibilidad = async (idfisioterapeuta, fecha_hora, duracionMinutos = 20) => {
-    const fecha = new Date(fecha_hora)
-    const fin   = new Date(fecha.getTime() + duracionMinutos * 60 * 1000)
-
+    const inicio = new Date(fecha_hora)
+    const fin    = new Date(inicio.getTime() + duracionMinutos * 60 * 1000)
     const { data } = await supabase
-      .from('cita')
-      .select('idcita')
+      .from('cita').select('idcita')
       .eq('idfisioterapeuta', idfisioterapeuta)
       .not('estado', 'in', '(cancelada,ausente)')
-      .gte('fecha_hora', fecha.toISOString())
+      .gte('fecha_hora', inicio.toISOString())
       .lt('fecha_hora', fin.toISOString())
       .limit(1)
-
     return (data?.length ?? 0) > 0
   }
 
@@ -450,28 +420,29 @@ export function useCitas() {
     return `${persona.nombres ?? ''} ${persona.apellidos ?? ''}`.trim()
   }
 
-  // Nombre plano desde la estructura de JOIN de fetchCitas
+  // [E3] CORREGIDO: usa la estructura real del JOIN (cita.paciente.persona.*)
   const nombrePacienteFlat = (cita) =>
-    `${cita?.paciente?.persona?.nombres ?? ''} ${cita?.paciente?.persona?.apellidos ?? ''}`.trim() || '—'
+    nombreCompleto(cita?.paciente?.persona) || '—'
 
   const nombreFisioFlat = (cita) =>
-    `${cita?.fisioterapeuta?.persona?.nombres ?? ''} ${cita?.fisioterapeuta?.persona?.apellidos ?? ''}`.trim() || '—'
+    nombreCompleto(cita?.fisioterapeuta?.persona) || '—'
+
+  // Acaba de leer el celular del paciente desde la estructura anidada correcta
+  const celularPacienteFlat = (cita) =>
+    cita?.paciente?.persona?.celular ?? '—'
 
   return {
-    // Estado
     citas, fisios, servicios, horarios,
     loading, loadingAccion, userRole, userId,
-    // Computed de rol
     esEnfermera, esFisioterapeuta, esPaciente, esAdmin, esPersonalSalud, puedeGestionar,
-    // Acciones
     initUser,
     fetchCitas, fetchFisios, fetchServicios, fetchHorarioFisio,
     buscarPacientePorCodigo, buscarPacientePorDNI,
     obtenerSlotsDisponibles,
-    crearCita, confirmarCita, registrarCheckIn,
+    crearCita, confirmarCita, registrarCheckIn, avanzarEstado,
     cancelarCita, marcarAusente,
-    // Helpers
     formatFechaHora, getEstadoInfo, nombreCompleto,
-    nombrePacienteFlat, nombreFisioFlat,
+    nombrePacienteFlat, nombreFisioFlat, celularPacienteFlat,
+    TRANSICIONES_VALIDAS,
   }
 }

@@ -44,7 +44,6 @@ const { showAlert, showConfirm } = useAlert()
 const columnas = computed(() => {
   const base = ['paciente', 'fisioterapeuta', 'fecha', 'estado', 'acciones']
 
-  // Si es paciente, ocultamos la columna de Acciones
   if (esPaciente.value) {
     return base.filter(c => c !== 'acciones')
   }
@@ -65,7 +64,6 @@ const fetchServicios = async () => {
   }
 }
 
-// ── Estado local de UI ────────────────────────────────────────────────────────
 const viewMode = ref('list')
 const showModalNueva = ref(false)
 const showModalCancelacion = ref(false)
@@ -517,7 +515,7 @@ const obtenerSituacionCita = (sesion) => {
       </div>
     </Transition>
 
-    <ModalNuevaCita :isOpen="showModalNueva" :fisios="fisios" :servicios="servicios" :loadingAccion="loadingAccion"
+    <ModalNuevaCita :isOpen="showModalNueva" :fisios="fisios" :servicios="serviciosDisponibles" :loadingAccion="loadingAccion"
       :obtenerSlots="obtenerSlotsDisponibles" :onBuscarPorCodigo="buscarPacientePorCodigo" :onBuscarPorDNI="buscarPacientePorDNI"
       @close="showModalNueva = false" @submit="handleNuevaCita" />
     <ModalReprogramarCita :isOpen="showModalReprogramar" :sesion="sesionSeleccionada" :fisios="fisios"

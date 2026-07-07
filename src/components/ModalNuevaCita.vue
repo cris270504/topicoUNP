@@ -47,7 +47,7 @@ const esSesionFisioterapia = computed(() => {
   if (!idservicio.value) return false
   const serv = props.servicios.find(s => (s.idservicio || s.idservicio) === idservicio.value)
   if (!serv) return false
-  
+
   const nombreNormalizado = (serv.nombre_servicio || serv.nombre || '').toLowerCase()
   return nombreNormalizado.includes('fisioterapia') || nombreNormalizado.includes('sesion')
 })
@@ -91,7 +91,7 @@ const isDomingo = (fechaString) => {
 // Obtener slots independientes para una fila específica
 const fetchSlotsForRow = async (index) => {
   const row = sesiones.value[index]
-  
+
   if (!idFisioterapeuta.value || !row.fecha || isDomingo(row.fecha)) {
     row.slots = []
     row.hora = ''
@@ -173,7 +173,7 @@ const limpiarPaciente = () => {
 // Auto-selecciona el primer servicio
 watch(() => props.servicios, (lista) => {
   if (lista?.length && !idservicio.value) {
-    idservicio.value = lista[0].idservicio || lista[0].idservicio
+    idservicio.value = lista[0].idservicio
   }
 }, { immediate: true })
 
@@ -191,7 +191,7 @@ const resetForm = () => {
   idFisioterapeuta.value = null
   idservicio.value = props.servicios?.[0]?.idservicio || props.servicios?.[0]?.idservicio || null
   motivoConsulta.value = ''
-  
+
   // Resetear la lógica de sesiones
   cantidadSesiones.value = 1
   sesiones.value = [{ fecha: '', hora: '', slots: [], loading: false }]
@@ -221,8 +221,8 @@ const placeholderBusqueda = computed(() => tipoBusqueda.value === 'estudiante' ?
 const nombreFisio = (f) => {
   if (!f) return ''
   const persona = f.persona ?? f.Persona ?? {}
-  return `${persona?.nombres ?? ''} ${persona?.apellidos ?? ''}`.trim() + 
-         (f.especialidad ? ` — ${f.especialidad}` : '')
+  return `${persona?.nombres ?? ''} ${persona?.apellidos ?? ''}`.trim() +
+    (f.especialidad ? ` — ${f.especialidad}` : '')
 }
 
 const labelTipoBusqueda = (id) => TIPOS_USUARIO.find(t => t.id === id)?.label ?? id
@@ -238,7 +238,7 @@ const labelResultado = (p) => {
 // El form es válido si el paciente y fisio están elegidos, y TODAS las filas tienen fecha, hora y no son domingo.
 const formularioValido = computed(() => {
   if (!pacienteSeleccionado.value || !idFisioterapeuta.value) return false
-  
+
   return sesiones.value.every(s => s.fecha && s.hora && !isDomingo(s.fecha))
 })
 
@@ -265,7 +265,7 @@ watch(pacienteSeleccionado, (p) => {
           <!-- ── Sección 1: Paciente ─────────────────────────────────────── -->
           <div class="form-section">
             <p class="section-label">1. Paciente</p>
-            
+
             <div class="input-group">
               <label>Tipo de usuario <span class="req">*</span></label>
               <div class="tipo-usuario-grid">
@@ -287,11 +287,13 @@ watch(pacienteSeleccionado, (p) => {
                     </span>
                     <span class="chip-detalle">
                       {{ labelTipoBusqueda(tipoBusqueda) }} ·
-                      {{ tipoBusqueda === 'estudiante' ? pacienteSeleccionado.codigo_universitario : pacienteSeleccionado.persona?.numero_documento }}
+                      {{ tipoBusqueda === 'estudiante' ? pacienteSeleccionado.codigo_universitario :
+                        pacienteSeleccionado.persona?.numero_documento }}
                       · {{ pacienteSeleccionado.facultad_escuela }}
                     </span>
                   </div>
-                  <button type="button" class="chip-clear" @click="limpiarPaciente" title="Cambiar paciente">&times;</button>
+                  <button type="button" class="chip-clear" @click="limpiarPaciente"
+                    title="Cambiar paciente">&times;</button>
                 </div>
 
                 <template v-else>
@@ -319,17 +321,18 @@ watch(pacienteSeleccionado, (p) => {
                 <label>Servicio <span class="req">*</span></label>
                 <select v-model="idservicio" required>
                   <option :value="null" disabled>— Seleccionar servicio —</option>
-                  <option v-for="s in servicios" :key="s.idservicio || s.idservicio" :value="s.idservicio || s.idservicio">
-                    {{ s.nombre_servicio || s.nombre }}
+                  <option v-for="s in servicios" :key="s.idservicio" :value="s.idservicio"> <!-- 👈 Limpiado -->
+                    {{ s.nombre_servicio }}
                   </option>
                 </select>
               </div>
-              
+
               <div class="input-group">
                 <label>Fisioterapeuta <span class="req">*</span></label>
                 <select v-model="idFisioterapeuta" required>
                   <option :value="null" disabled>— Seleccionar especialista —</option>
-                  <option v-for="f in fisios" :key="f.idFisioterapeuta ?? f.idfisioterapeuta" :value="f.idFisioterapeuta ?? f.idfisioterapeuta">
+                  <option v-for="f in fisios" :key="f.idFisioterapeuta ?? f.idfisioterapeuta"
+                    :value="f.idFisioterapeuta ?? f.idfisioterapeuta">
                     {{ nombreFisio(f) }}
                   </option>
                 </select>
@@ -348,14 +351,16 @@ watch(pacienteSeleccionado, (p) => {
           <!-- ── Sección 3: Fechas y Horarios (Dinámicos) ───────────────── -->
           <div class="form-section">
             <p class="section-label">3. Agenda de citas</p>
-            
-            <div v-for="(sesion, index) in sesiones" :key="index" class="sesion-row" style="margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px dashed #eee;">
+
+            <div v-for="(sesion, index) in sesiones" :key="index" class="sesion-row"
+              style="margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px dashed #eee;">
               <h4 v-if="sesiones.length > 1" style="margin-bottom: 0.8rem; color: #555;">📍 Sesión {{ index + 1 }}</h4>
-              
+
               <div class="form-grid">
                 <div class="input-group">
                   <label>Fecha <span class="req">*</span></label>
-                  <input type="date" v-model="sesion.fecha" :min="fechaMin" @change="fetchSlotsForRow(index)" required />
+                  <input type="date" v-model="sesion.fecha" :min="fechaMin" @change="fetchSlotsForRow(index)"
+                    required />
                   <p v-if="isDomingo(sesion.fecha)" class="field-hint warn">
                     ⚠️ El tópico no atiende los domingos.
                   </p>
@@ -363,15 +368,16 @@ watch(pacienteSeleccionado, (p) => {
 
                 <div class="input-group">
                   <label>Horario disponible <span class="req">*</span></label>
-                  <select v-model="sesion.hora" required :disabled="!sesion.fecha || !idFisioterapeuta || sesion.loading || isDomingo(sesion.fecha)">
+                  <select v-model="sesion.hora" required
+                    :disabled="!sesion.fecha || !idFisioterapeuta || sesion.loading || isDomingo(sesion.fecha)">
                     <option value="" disabled>
                       {{
                         sesion.loading ? 'Buscando turnos libres...' :
-                        isDomingo(sesion.fecha) ? '❌ Día no disponible' :
-                        !idFisioterapeuta ? '⚠️ Selecciona especialista' :
-                        !sesion.fecha ? '⚠️ Selecciona una fecha' :
-                        getSlotsFiltrados(index).length === 0 ? '❌ Sin turnos' :
-                        '— Seleccionar hora —'
+                          isDomingo(sesion.fecha) ? '❌ Día no disponible' :
+                            !idFisioterapeuta ? '⚠️ Selecciona especialista' :
+                              !sesion.fecha ? '⚠️ Selecciona una fecha' :
+                                getSlotsFiltrados(index).length === 0 ? '❌ Sin turnos' :
+                                  '— Seleccionar hora —'
                       }}
                     </option>
                     <option v-for="slot in getSlotsFiltrados(index)" :key="slot" :value="slot">
@@ -387,13 +393,15 @@ watch(pacienteSeleccionado, (p) => {
           <div class="form-section">
             <p class="section-label">4. Motivo de consulta (opcional)</p>
             <div class="input-group">
-              <textarea v-model="motivoConsulta" rows="2" placeholder="Aplica para todas las sesiones..." maxlength="300"></textarea>
+              <textarea v-model="motivoConsulta" rows="2" placeholder="Aplica para todas las sesiones..."
+                maxlength="300"></textarea>
               <span class="char-count">{{ motivoConsulta.length }}/300</span>
             </div>
           </div>
 
           <div class="modal-actions">
-            <button type="button" class="btn-secondary" @click="emit('close')" :disabled="loadingAccion">Cancelar</button>
+            <button type="button" class="btn-secondary" @click="emit('close')"
+              :disabled="loadingAccion">Cancelar</button>
             <button type="submit" class="btn-primary-submit" :disabled="loadingAccion || !formularioValido">
               <span v-if="loadingAccion" class="btn-spinner"></span>
               <span v-else>{{ sesiones.length > 1 ? `Registrar ${sesiones.length} Citas` : 'Registrar Cita' }}</span>
