@@ -1,22 +1,32 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { supabase } from '@/lib/supabaseClient'
 import { useAlert } from '@/composables/useAlert'
 import { useRouter } from 'vue-router'
+import { useCitas } from '@/composables/useCitas'
 
 const { showAlert } = useAlert()
 const router = useRouter()
 
+// Importamos la lógica de roles y personal desde tu composable
+const { esAdmin, fisios, fetchFisios, initUser, userId } = useCitas()
+
 const loading = ref(false)
 const searchQuery = ref('')
 const expedientes = ref([])
+const fisioSeleccionado = ref(null)
 
 const fetchExpedientes = async () => {
+  // Determinamos de quién vamos a buscar los expedientes
+  const targetId = esAdmin.value ? fisioSeleccionado.value : userId.value
+  
+  if (!targetId) {
+    expedientes.value = []
+    return
+  }
+
   loading.value = true
   try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) throw new Error('Sin sesión activa')
-
     const { data, error } = await supabase
       .from('cita')
       .select(`
@@ -26,7 +36,7 @@ const fetchExpedientes = async () => {
           persona ( nombres, apellidos, numero_documento, tipo_documento, celular )
         )
       `)
-      .eq('idfisioterapeuta', user.id)
+      .eq('idfisioterapeuta', targetId)
       .not('estado', 'in', '("cancelada")')
       .order('fecha_hora', { ascending: false })
 
@@ -102,7 +112,29 @@ const irAHistoria = (id) => {
   router.push({ name: 'HistoriaClinica', params: { idPaciente: id } })
 }
 
-onMounted(fetchExpedientes)
+// Inicialización
+onMounted(async () => {
+  await initUser()
+  
+  if (esAdmin.value) {
+    await fetchFisios()
+    // Autoseleccionar al primer fisio de la lista para no mostrar la tabla vacía al inicio
+    if (fisios.value.length > 0) {
+      fisioSeleccionado.value = fisios.value[0].idfisioterapeuta
+    }
+  } else {
+    // Si no es admin, carga directamente los suyos
+    await fetchExpedientes()
+  }
+})
+
+// Si el administrador cambia de fisioterapeuta en el select, recargamos la tabla
+watch(fisioSeleccionado, (nuevoFisio) => {
+  if (nuevoFisio) {
+    searchQuery.value = '' // Limpiar búsqueda al cambiar de doctor
+    fetchExpedientes()
+  }
+})
 </script>
 
 <template>
@@ -110,8 +142,9 @@ onMounted(fetchExpedientes)
 
     <div class="action-header">
       <div class="header-text">
-        <h2>Mis Expedientes</h2>
-        <p>Pacientes que has atendido — accede a su historia clínica completa.</p>
+        <!-- Títulos dinámicos según el rol -->
+        <h2>{{ esAdmin ? 'Expedientes por Especialista' : 'Mis Expedientes' }}</h2>
+        <p>{{ esAdmin ? 'Selecciona un fisioterapeuta para ver sus pacientes atendidos.' : 'Pacientes que has atendido — accede a su historia clínica completa.' }}</p>
       </div>
       <div class="header-stats">
         <div class="stat-pill">
@@ -119,16 +152,31 @@ onMounted(fetchExpedientes)
           <span class="stat-label">pacientes</span>
         </div>
         <div class="stat-pill">
-          <span class="stat-number">{{expedientes.reduce((s, e) => s + e.citasCompletadas, 0)}}</span>
+          <span class="stat-number">{{ expedientes.reduce((s, e) => s + e.citasCompletadas, 0) }}</span>
           <span class="stat-label">sesiones completadas</span>
         </div>
       </div>
     </div>
 
-    <div class="data-card search-bar-card">
-      <div class="input-group" style="max-width: 460px;">
+    <!-- Barra de búsqueda y selector -->
+    <div class="data-card search-bar-card" style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+      
+      <!-- Selector (Solo visible para Admin) -->
+      <div v-if="esAdmin" class="input-group" style="flex: 1; min-width: 250px; max-width: 320px;">
+        <label style="font-size: 0.85rem; color: #64748b; margin-bottom: 6px; display: block;">Filtrar por Fisioterapeuta</label>
+        <select v-model="fisioSeleccionado" style="background: #ffffff; width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px;">
+          <option :value="null" disabled>— Seleccionar especialista —</option>
+          <option v-for="f in fisios" :key="f.idfisioterapeuta" :value="f.idfisioterapeuta">
+            {{ f.persona?.nombres }} {{ f.persona?.apellidos }}
+          </option>
+        </select>
+      </div>
+
+      <!-- Buscador general -->
+      <div class="input-group" style="flex: 2; min-width: 250px; max-width: 460px;">
+        <label v-if="esAdmin" style="font-size: 0.85rem; color: transparent; margin-bottom: 6px; display: block;">Buscador</label>
         <input v-model="searchQuery" type="text" placeholder="Buscar por nombre, documento o código UNP..."
-          style="background: #ffffff;" />
+          style="background: #ffffff; width: 100%;" />
       </div>
     </div>
 
@@ -185,8 +233,9 @@ onMounted(fetchExpedientes)
             </tr>
             <tr v-if="filtrados.length === 0 && !loading">
               <td colspan="7" class="empty-row">
-                {{ searchQuery ? 'No se encontraron resultados para la búsqueda.' : 'Aún no tienes pacientes atendidos.'
-                }}
+                <template v-if="searchQuery">No se encontraron resultados para la búsqueda.</template>
+                <template v-else-if="esAdmin">El especialista seleccionado aún no ha registrado expedientes.</template>
+                <template v-else>Aún no tienes pacientes atendidos.</template>
               </td>
             </tr>
           </tbody>
