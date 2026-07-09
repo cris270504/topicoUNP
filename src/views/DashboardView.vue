@@ -2,20 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useDashboard } from '@/composables/useDashboard'
 import { ESTADOS_CITA, useCitas } from '@/composables/useCitas'
-import { supabase } from '@/lib/supabaseClient'
 import ModalNuevaCita from '@/components/ModalNuevaCita.vue'
-// 1. Declaramos la variable para que Vue ya no lance el error "not defined"
-const rolUsuario = ref('')
-
-// 2. Creamos una función para leer el "carnet" de Supabase al cargar la página
-const obtenerRolActual = async () => {
-  const { data: { user }, error } = await supabase.auth.getUser()
-  
-  if (user && user.user_metadata) {
-    // Extraemos el rol oculto (ej: 'admin', 'enfermera', 'fisioterapeuta')
-    rolUsuario.value = user.user_metadata.rol || 'estudiante'
-  }
-}
 const {
   citasHoy, citasProximas, pacientesEnSala, ocupacionPersonal, indicacionesPendientes,
   resumenEstados, totalCitasHoy, loading, fetchDashboard,
@@ -52,11 +39,9 @@ const handleNuevaCita = async (payloads) => {
   }
 }
 
-onMounted(() => {
-  obtenerRolActual()
-  fetchDashboard()
-  fetchFisios()
-  fetchServicios()
+onMounted(async () => {
+  await fetchDashboard()
+  await Promise.all([fetchFisios(), fetchServicios()])
 })
 
 const formatHora = (iso) => {

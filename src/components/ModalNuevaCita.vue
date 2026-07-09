@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { TIPOS_USUARIO } from '@/composables/useCitas'
 import { getTodayISO } from '@/lib/dateUtils'
 
@@ -126,6 +126,8 @@ watch([idfisioterapeuta, idservicio], ([newFisio, newServ]) => {
     sesiones.value.forEach((_, i) => fetchSlotsForRow(i))
   }
 })
+
+onUnmounted(() => clearTimeout(timerBusqueda))
 
 // ── Búsqueda dinámica de Pacientes ───────────────────────────────────────────
 let timerBusqueda = null

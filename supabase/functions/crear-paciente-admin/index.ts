@@ -16,7 +16,7 @@ serve(async (req) => {
   try {
     // Extraemos el payload que envías desde Vue
     const body = await req.json()
-    const { email, password, user_metadata } = body
+    const { email, password, nombres, apellidos, rol, tipo_documento, numero_documento, celular, fecha_nacimiento } = body
 
     // Inicializamos el cliente de Supabase con el SERVICE_ROLE_KEY para tener permisos de Admin
     const supabaseAdmin = createClient(
@@ -29,7 +29,7 @@ serve(async (req) => {
       email: email,
       password: password,
       email_confirm: true,
-      user_metadata: user_metadata || {}
+      user_metadata: { nombres, apellidos, rol, tipo_documento, numero_documento, celular, fecha_nacimiento }
     })
 
     if (error) throw error

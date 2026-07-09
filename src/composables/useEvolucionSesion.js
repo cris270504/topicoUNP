@@ -20,6 +20,7 @@ export function useEvolucionSesion() {
   const { showAlert } = useAlert()
 
   const loading = ref(false)
+  const darDeAlta = ref(false)
 
   // ─────────────────────────────────────────────────────────────────────
   // Catálogo de métricas disponibles para evolución (tabla Evaluacion)
@@ -36,7 +37,7 @@ export function useEvolucionSesion() {
    *   - mediciones      Array<{ idEvaluacion, resultado, observacion }>
    *                      ej: [{ idEvaluacion: 3, resultado: 4, observacion: 'EVA bajó de 7 a 4' }]
    */
-  const registrarEvolucion = async ({ idSesion, notasEvolucion, indicaciones, mediciones = [] }) => {
+  const registrarEvolucion = async ({ idSesion, idTratamiento, notasEvolucion, indicaciones, mediciones = [] }) => {
     if (!idSesion) { showAlert('Falta indicar la sesión.', 'error'); return false }
     if (!notasEvolucion?.trim()) { showAlert('Debe registrar al menos una nota de evolución.', 'error'); return false }
 
@@ -63,20 +64,20 @@ export function useEvolucionSesion() {
           observacion: m.observacion || null,
         }))
 
-        if (darDeAlta.value) {
-          const { error: errAlta } = await supabase
-            .from('Tratamiento')
-            .update({ estado: 'finalizado' }) // Asumiendo que tienes esta columna
-            .eq('idTratamiento', sesion.idTratamiento)
-
-          if (errAlta) console.error("Error al dar de alta:", errAlta)
-        }
-
         const { error: errMed } = await supabase
           .from('Sesion_Evaluacion')
           .insert(filas)
 
         if (errMed) throw errMed
+      }
+
+      if (darDeAlta.value && idTratamiento) {
+        const { error: errAlta } = await supabase
+          .from('Tratamiento')
+          .update({ estado: 'finalizado' })
+          .eq('idTratamiento', idTratamiento)
+
+        if (errAlta) console.error('Error al dar de alta:', errAlta)
       }
 
       showAlert('✅ Evolución registrada.', 'success')
@@ -89,9 +90,6 @@ export function useEvolucionSesion() {
       loading.value = false
     }
   }
-  const darDeAlta = ref(false) // Vinculado al checkbox
-
-
   // ─────────────────────────────────────────────────────────────────────
   // Obtener el historial de evolución (timeline) de un Tratamiento
   // ─────────────────────────────────────────────────────────────────────
@@ -129,6 +127,7 @@ export function useEvolucionSesion() {
 
   return {
     loading,
+    darDeAlta,
     registrarEvolucion,
     fetchTimelineEvolucion,
   }

@@ -13,6 +13,11 @@ const emit = defineEmits(['close', 'refresh'])
 // 2. Composable de Alertas
 const { showAlert } = useAlert()
 
+const generarContrasenaSegura = () => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$!'
+  return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+}
+
 // 3. Estados operativos locales
 const loading = ref(false)
 const isEditing = ref(false)
@@ -171,7 +176,7 @@ const handleSubmit = async () => {
             const { data, error: errAuth } = await supabase.functions.invoke('crear-paciente-admin', {
                 body: {
                     email: emailTrim,
-                    password: docFiltrado,
+                    password: generarContrasenaSegura(),
                     nombres: nombresTrim,
                     apellidos: apellidosTrim,
                     rol: 'paciente',
