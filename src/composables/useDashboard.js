@@ -14,6 +14,7 @@ export function useDashboard() {
   const citasProximas = ref([]) // Para la vista del paciente
   const pacientesEnSala = ref([])
   const ocupacionPersonal = ref([])
+  const indicacionesPendientes = ref([]) // Añadido para recepcion
 
   const totalCitasHoy = ref(0)
   const resumenEstados = ref({
@@ -52,9 +53,10 @@ export function useDashboard() {
       let query = supabase.from('cita')
         .select(`
           idcita, fecha_hora, estado, paciente_en_sala,
+          cantidad_sesiones_recomendadas, frecuencia_sesiones_recomendadas, tratamiento_recetado,
           paciente ( idpaciente, codigo_universitario, persona ( nombres, apellidos, celular ) ),
           fisioterapeuta ( idfisioterapeuta, especialidad, persona ( nombres, apellidos ) ),
-          servicio_topico ( nombre_servicio )
+          servicio_topico ( idservicio, nombre_servicio )
         `)
         .gte('fecha_hora', inicioDia)
         .lte('fecha_hora', finDia)
@@ -74,6 +76,7 @@ export function useDashboard() {
       Object.keys(resumenEstados.value).forEach(k => resumenEstados.value[k] = 0)
       const ocupacionMap = {}
       pacientesEnSala.value = []
+      indicacionesPendientes.value = []
 
       citasHoy.value.forEach(cita => {
         // Conteo de estados
@@ -84,6 +87,11 @@ export function useDashboard() {
         // Pacientes en sala de espera (recepcionados)
         if (cita.paciente_en_sala && ['confirmada', 'en_triaje'].includes(cita.estado)) {
           pacientesEnSala.value.push(cita)
+        }
+
+        // Indicaciones pendientes (Fase 4)
+        if (cita.estado === 'completada' && cita.cantidad_sesiones_recomendadas > 0) {
+          indicacionesPendientes.value.push(cita)
         }
 
         // Ocupación del personal (Agrupación)
@@ -116,10 +124,9 @@ export function useDashboard() {
   }
 
   return {
-    loading, citasHoy, citasProximas, pacientesEnSala, ocupacionPersonal,
-    resumenEstados, totalCitasHoy, fetchDashboard,
-    // Roles (misma instancia que se usa en fetchDashboard)
-    esPaciente, esPersonalSalud, esAdmin, esEnfermera
-
+    citasHoy, citasProximas, pacientesEnSala, ocupacionPersonal, indicacionesPendientes,
+    resumenEstados, totalCitasHoy, loading,
+    esPaciente, esPersonalSalud, esAdmin, esEnfermera,
+    fetchDashboard
   }
 }

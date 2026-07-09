@@ -12,6 +12,7 @@ const props = defineProps({
   obtenerSlots: { type: Function, required: true },
   onBuscarPorCodigo: { type: Function, required: true },
   onBuscarPorDNI: { type: Function, required: true },
+  initialData: { type: Object, default: () => null }
 })
 
 const emit = defineEmits(['close', 'submit', 'fisio-changed'])
@@ -26,6 +27,24 @@ const pacienteSeleccionado = ref(null)
 const idfisioterapeuta = ref(null)
 const idservicio = ref(null)
 const motivoConsulta = ref('')
+
+watch(() => props.isOpen, (newVal) => {
+  if (newVal && props.initialData) {
+    pacienteSeleccionado.value = props.initialData.paciente
+    idfisioterapeuta.value = props.initialData.idfisioterapeuta
+    idservicio.value = props.initialData.idservicio || null
+    cantidadSesiones.value = props.initialData.cantidadSesiones || 1
+  } else if (!newVal) {
+    pacienteSeleccionado.value = null
+    idfisioterapeuta.value = null
+    idservicio.value = null
+    cantidadSesiones.value = 1
+    motivoConsulta.value = ''
+    tipoBusqueda.value = null
+    terminoBusqueda.value = ''
+    resultadosBusqueda.value = []
+  }
+})
 
 // ── Lógica Dinámica de Múltiples Sesiones ────────────────────────────────────
 const cantidadSesiones = ref(1)
@@ -101,9 +120,9 @@ const getSlotsFiltrados = (index) => {
   })
 }
 
-watch(idfisioterapeuta, (val) => {
-  if (val) {
-    emit('fisio-changed', val)
+watch([idfisioterapeuta, idservicio], ([newFisio, newServ]) => {
+  if (newFisio && newServ) {
+    if (idfisioterapeuta.value !== newFisio) emit('fisio-changed', newFisio)
     sesiones.value.forEach((_, i) => fetchSlotsForRow(i))
   }
 })
@@ -175,7 +194,7 @@ const handleSubmit = () => {
     idfisioterapeuta: idfisioterapeuta.value,
     idservicio: idservicio.value,
     fecha_hora: `${sesion.fecha}T${sesion.hora}:00-05:00`,
-    motivo_consulta: motivoConsulta.value || null,
+    motivo_reserva: motivoConsulta.value || null,
   }))
 
   emit('submit', payloadCitas)

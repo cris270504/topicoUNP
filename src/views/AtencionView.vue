@@ -7,12 +7,13 @@ import { useAlert } from '@/composables/useAlert'
 // ── IMPORTACIÓN DE TUS NUEVOS COMPONENTES MODULARES ──
 import FichaEvaluacionInicial from '@/components/FichaEvaluacionInicial.vue'
 import FormularioEvolucion from '@/components/FormularioEvolucion.vue'
+import ModalResultados from '@/components/ModalResultados.vue'
 
 const route = useRoute()
 const router = useRouter()
 const { showAlert } = useAlert()
 
-const idSesion = route.params.idSesion
+const idCita = route.params.idCita
 const loading = ref(true)
 
 // ── Estados Principales ──
@@ -23,6 +24,8 @@ const paciente = ref(null)
 const showModalAntecedentes = ref(false)
 const savingAntecedentes = ref(false)
 const verFichaHistorica = ref(false) // Controla el modal de lectura pedido por la fisio
+const showModalResultados = ref(false)
+const savingResultados = ref(false)
 
 const antecedentes = ref({
   alergias: '',
@@ -52,12 +55,12 @@ const guardarAtencionMasaje = async () => {
     const NotasEvolucionFinal = `Tipo de Masaje: ${tipoMasaje.value.trim()} | Observaciones: ${comentarioMasaje.value.trim() || 'Sin observaciones adicionales.'}`
 
     const { error } = await supabase
-      .from('Sesion')
+      .from('cita')
       .update({
         notas_evolucion: NotasEvolucionFinal,
-        estado: 'atendida' // Transiciona la cita directamente a atendida
+        estado: 'completada' // Transiciona la cita directamente a completada
       })
-      .eq('idSesion', idSesion)
+      .eq('idcita', idCita)
 
     if (error) throw error
 
@@ -72,28 +75,42 @@ const guardarAtencionMasaje = async () => {
 
 const cargarSesionClinica = async () => {
   try {
-    const { data: dataSesion, error: errSesion } = await supabase
-      .from('Sesion')
+    const { data: dataCita, error: errCita } = await supabase
+      .from('cita')
       .select(`
         *,
-        Paciente (
-          idPaciente,
-          Persona (nombres, apellidos, numero_documento, fecha_nacimiento)
-        )
+        paciente (
+          idpaciente,
+          persona (nombres, apellidos, numero_documento, fecha_nacimiento)
+        ),
+        servicio_topico (nombre_servicio)
       `)
-      .eq('idSesion', idSesion)
+      .eq('idcita', idCita)
       .single()
 
-    if (errSesion) throw errSesion
+    if (errCita) throw errCita
 
-    sesion.value = dataSesion
-    paciente.value = dataSesion.Paciente.Persona
+    const nombreServ = dataCita.servicio_topico?.nombre_servicio?.toLowerCase() || ''
+    
+    sesion.value = {
+      ...dataCita,
+      idSesion: dataCita.idcita,
+      idPaciente: dataCita.idpaciente,
+      idFisioterapeuta: dataCita.idfisioterapeuta,
+      tipo: nombreServ.includes('masaje') ? 'masaje' : (nombreServ.includes('evaluación') ? 'evaluacion' : 'tratamiento'),
+      es_evaluacion_inicial: nombreServ.includes('evaluación')
+    }
+    
+    paciente.value = {
+      ...dataCita.paciente?.persona,
+      idPaciente: dataCita.idpaciente
+    }
 
     // Cargamos Antecedentes para la barra lateral
     const { data: dataAntec, error: errAntec } = await supabase
-      .from('Antecedentes')
+      .from('antecedentes')
       .select('*')
-      .eq('idPaciente', dataSesion.idPaciente)
+      .eq('idpaciente', dataCita.idpaciente)
       .maybeSingle()
 
     if (errAntec) throw errAntec
@@ -143,8 +160,8 @@ const guardarAntecedentes = async () => {
     }
 
     const { error } = await supabase
-      .from('Antecedentes')
-      .upsert(payload, { onConflict: 'idPaciente' })
+      .from('antecedentes')
+      .upsert(payload, { onConflict: 'idpaciente' })
 
     if (error) throw error
 
@@ -158,14 +175,30 @@ const guardarAntecedentes = async () => {
 }
 
 // Escucha el evento de completado desde cualquiera de los dos componentes hijos
-const finalizarAtencion = async () => {
+const finalizarAtencion = () => {
+  // Abrimos el modal de resultados para capturar diagnóstico e indicaciones
+  showModalResultados.value = true
+}
+
+const guardarResultadosYFinalizar = async (payload) => {
+  savingResultados.value = true
   try {
-    // Por si el componente no cambió el estado, lo forzamos aquí a modo de seguro
-    await supabase.from('Sesion').update({ estado: 'atendida' }).eq('idSesion', idSesion)
+    const { error } = await supabase.from('cita').update({
+      estado: 'completada',
+      diagnostico_descripcion: payload.diagnostico,
+      tratamiento_recetado: payload.indicaciones,
+      cantidad_sesiones_recomendadas: payload.cantidadSesiones,
+      frecuencia_sesiones_recomendadas: payload.frecuencia
+    }).eq('idcita', idCita)
+    
+    if (error) throw error
     showAlert('📝 Registro clínico guardado y sesión finalizada.', 'success')
     router.push('/citas')
   } catch (err) {
-    showAlert('Error al cambiar el estado de la cita.', 'error')
+    showAlert('Error al guardar los resultados y finalizar: ' + err.message, 'error')
+  } finally {
+    savingResultados.value = false
+    showModalResultados.value = false
   }
 }
 
@@ -350,6 +383,14 @@ onMounted(() => { cargarSesionClinica() })
         </div>
       </div>
     </Transition>
+
+    <ModalResultados 
+      :isOpen="showModalResultados" 
+      :sesion="sesion"
+      :loadingAccion="savingResultados" 
+      @close="showModalResultados = false" 
+      @submit="guardarResultadosYFinalizar" 
+    />
 
   </div>
 </template>

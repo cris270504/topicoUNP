@@ -1,13 +1,15 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { supabase } from '@/lib/supabaseClient'
 import { useAlert } from '@/composables/useAlert'
+import { useCitas } from '@/composables/useCitas'
 
 const { showAlert, showConfirm } = useAlert()
+const { esAdmin, fisios, fetchFisios, initUser, userId } = useCitas()
 
 const loading = ref(false)
-const userId = ref(null)
 const horarios = ref([]) // Estado local de todos los turnos en pantalla
+const fisioSeleccionado = ref(null) // ID del fisio cuyo horario estamos viendo/editando
 
 // Diccionario de días para iterar la interfaz (BD solo admite 1=Lunes … 6=Sábado)
 const DIAS_SEMANA = [
@@ -19,18 +21,21 @@ const DIAS_SEMANA = [
   { id: 6, label: 'Sábado' },
 ]
 
-// Cargar los horarios actuales del fisioterapeuta en sesión
+// Cargar los horarios actuales del fisioterapeuta seleccionado
 const fetchHorarios = async () => {
+  const targetId = esAdmin.value ? fisioSeleccionado.value : userId.value
+
+  if (!targetId) {
+    horarios.value = []
+    return
+  }
+
   loading.value = true
   try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) throw new Error('No hay sesión activa.')
-    userId.value = user.id
-
     const { data, error } = await supabase
       .from('horario')
       .select('*')
-      .eq('idfisioterapeuta', userId.value)
+      .eq('idfisioterapeuta', targetId)
       .order('dia_semana', { ascending: true })
       .order('hora_inicio', { ascending: true })
 
@@ -43,7 +48,7 @@ const fetchHorarios = async () => {
       hora_fin: h.hora_fin.substring(0, 5)
     }))
   } catch (error) {
-    showAlert('Error al cargar tu horario: ' + error.message, 'error')
+    showAlert('Error al cargar horario: ' + error.message, 'error')
   } finally {
     loading.value = false
   }
@@ -61,43 +66,36 @@ const removerTurno = (turno) => {
 }
 
 // Verifica que exista el registro en fisioterapeuta; si falta, lo crea automáticamente
-const asegurarPerfilFisioterapeuta = async (user) => {
+const asegurarPerfilFisioterapeuta = async (idAchequear) => {
   const { data, error } = await supabase
     .from('fisioterapeuta')
     .select('idfisioterapeuta')
-    .eq('idfisioterapeuta', user.id)
+    .eq('idfisioterapeuta', idAchequear)
     .maybeSingle()
 
-  if (error) throw new Error('Error al verificar tu perfil: ' + error.message)
+  if (error) throw new Error('Error al verificar el perfil del especialista: ' + error.message)
 
   if (!data) {
-    // El usuario existe en auth pero no en fisioterapeuta — lo creamos automáticamente
-    const meta = user.user_metadata || {}
+    // Si no existe, lo creamos. (Asumimos valores por defecto si no es el usuario actual).
     const { error: errInsert } = await supabase
       .from('fisioterapeuta')
       .insert({
-        idfisioterapeuta: user.id,
-        especialidad: meta.especialidad || 'General',
-        tipo_personal: meta.tipo_personal || 'medico',
+        idfisioterapeuta: idAchequear,
+        especialidad: 'General',
+        tipo_personal: 'medico',
         activo: true
       })
-    if (errInsert) throw new Error(
-      'Tu perfil de especialista no está registrado en el sistema. ' +
-      'Contacta al administrador para que lo complete. (' + errInsert.message + ')'
-    )
+    if (errInsert) throw new Error('No se pudo inicializar el perfil del especialista. (' + errInsert.message + ')')
   }
 }
 
 // Lógica de Guardado (Batch Save)
 const guardarHorarios = async () => {
-  // Aseguramos tener el userId antes de operar (por si fetchHorarios falló antes de asignarlo)
-  if (!userId.value) {
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      showAlert('No hay sesión activa. Por favor recarga la página.', 'error')
-      return
-    }
-    userId.value = user.id
+  const targetId = esAdmin.value ? fisioSeleccionado.value : userId.value
+
+  if (!targetId) {
+    showAlert('Debes seleccionar un especialista antes de guardar.', 'error')
+    return
   }
 
   // 1. Validaciones lógicas
@@ -112,27 +110,26 @@ const guardarHorarios = async () => {
     }
   }
 
-  const confirmado = await showConfirm('¿Deseas guardar estos horarios? Esto actualizará tu disponibilidad en el sistema de citas.')
+  const confirmado = await showConfirm('¿Deseas guardar estos horarios? Esto actualizará la disponibilidad en el sistema de citas.')
   if (!confirmado) return
 
   loading.value = true
   try {
     // 2. Verificar / crear el registro en fisioterapeuta antes de insertar horarios
-    const { data: { user } } = await supabase.auth.getUser()
-    await asegurarPerfilFisioterapeuta(user)
+    await asegurarPerfilFisioterapeuta(targetId)
 
     // 3. Eliminamos los registros anteriores del fisioterapeuta
     const { error: errDel } = await supabase
       .from('horario')
       .delete()
-      .eq('idfisioterapeuta', userId.value)
+      .eq('idfisioterapeuta', targetId)
 
     if (errDel) throw errDel
 
     // 4. Insertamos el nuevo bloque de horarios completo
     if (horarios.value.length > 0) {
       const inserts = horarios.value.map(h => ({
-        idfisioterapeuta: userId.value,
+        idfisioterapeuta: targetId,
         dia_semana: h.dia_semana,
         hora_inicio: h.hora_inicio,
         hora_fin: h.hora_fin
@@ -145,7 +142,7 @@ const guardarHorarios = async () => {
       if (errIns) throw errIns
     }
 
-    showAlert('¡Tu horario ha sido actualizado con éxito!', 'success')
+    showAlert('¡El horario ha sido actualizado con éxito!', 'success')
     await fetchHorarios() // Recargar para sincronizar
   } catch (error) {
     showAlert('Error al guardar: ' + error.message, 'error')
@@ -154,8 +151,26 @@ const guardarHorarios = async () => {
   }
 }
 
-onMounted(() => {
-  fetchHorarios()
+onMounted(async () => {
+  await initUser()
+
+  if (esAdmin.value) {
+    await fetchFisios()
+    // Si hay fisios, seleccionamos el primero y cargamos su horario
+    if (fisios.value.length > 0) {
+      fisioSeleccionado.value = fisios.value[0].idfisioterapeuta
+    }
+  } else {
+    // Si es fisioterapeuta, carga sus propios horarios
+    await fetchHorarios()
+  }
+})
+
+// Si el admin cambia de especialista, recargamos la grilla
+watch(fisioSeleccionado, (nuevoFisio) => {
+  if (nuevoFisio) {
+    fetchHorarios()
+  }
 })
 </script>
 
@@ -164,10 +179,11 @@ onMounted(() => {
 
     <div class="action-header">
       <div class="header-text">
-        <h2>Mi Disponibilidad</h2>
-        <p>Configura tus bloques de atención para que recepción pueda agendarte citas.</p>
+        <h2>{{ esAdmin ? 'Gestión de Horarios' : 'Mi Disponibilidad' }}</h2>
+        <p>{{ esAdmin ? 'Configura los bloques de atención del personal del tópico.' : 'Configura tus bloques de atención para que recepción pueda agendarte citas.' }}</p>
       </div>
-      <button class="primary-btn" @click="guardarHorarios" :disabled="loading">
+
+      <button class="primary-btn" @click="guardarHorarios" :disabled="loading || (esAdmin && !fisioSeleccionado)">
         <span v-if="loading" class="btn-spinner"></span>
         <span v-else>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
@@ -178,32 +194,57 @@ onMounted(() => {
       </button>
     </div>
 
-    <div class="horarios-grid">
-      <div v-for="dia in DIAS_SEMANA" :key="dia.id" class="data-card dia-card">
+    <!-- Filtro de Especialista (Solo Admin) -->
+<!-- Filtro de Especialista (Solo Admin) -->
+    <div v-if="esAdmin" class="data-card admin-filter-card">
+      <div class="input-group admin-filter-group">
+        <label class="admin-filter-label">
+          Fisioterapeuta a gestionar:
+        </label>
+        <select v-model="fisioSeleccionado" :disabled="loading" class="admin-filter-select">
+          <option :value="null" disabled>— Seleccionar especialista —</option>
+          <option v-for="f in fisios" :key="f.idfisioterapeuta" :value="f.idfisioterapeuta">
+            {{ f.persona?.nombres }} {{ f.persona?.apellidos }}
+          </option>
+        </select>
+      </div>
+    </div>
 
-        <div class="dia-header">
-          <h3>{{ dia.label }}</h3>
-          <button class="btn-add-turno" @click="agregarTurno(dia.id)" title="Agregar bloque de hora">
-            + Añadir Turno
-          </button>
-        </div>
+    <!-- Grilla de Calendario Semanal -->
+    <div class="horarios-grid" :style="loading ? 'opacity: 0.6; pointer-events: none;' : ''">
 
-        <div class="dia-body">
-          <div v-if="getTurnosPorDia(dia.id).length === 0" class="dia-libre">
-            Día Libre (Sin atención)
-          </div>
+      <div v-if="!fisioSeleccionado && esAdmin" class="empty-row"
+        style="grid-column: 1 / -1; padding: 40px; background: white; border-radius: 12px; text-align: center;">
+        Por favor, selecciona un especialista para visualizar y editar su horario.
+      </div>
 
-          <div v-for="(turno, index) in getTurnosPorDia(dia.id)" :key="index" class="turno-row">
-            <input type="time" v-model="turno.hora_inicio" required />
-            <span>a</span>
-            <input type="time" v-model="turno.hora_fin" required />
-            <button type="button" class="btn-remove" @click="removerTurno(turno)" title="Eliminar turno">
-              &times;
+      <template v-else>
+        <div v-for="dia in DIAS_SEMANA" :key="dia.id" class="data-card dia-card">
+
+          <div class="dia-header">
+            <h3>{{ dia.label }}</h3>
+            <button class="btn-add-turno" @click="agregarTurno(dia.id)" title="Agregar bloque de hora">
+              + Añadir Turno
             </button>
           </div>
-        </div>
 
-      </div>
+          <div class="dia-body">
+            <div v-if="getTurnosPorDia(dia.id).length === 0" class="dia-libre">
+              Día Libre (Sin atención)
+            </div>
+
+            <div v-for="(turno, index) in getTurnosPorDia(dia.id)" :key="index" class="turno-row">
+              <input type="time" v-model="turno.hora_inicio" required />
+              <span>a</span>
+              <input type="time" v-model="turno.hora_fin" required />
+              <button type="button" class="btn-remove" @click="removerTurno(turno)" title="Eliminar turno">
+                &times;
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </template>
     </div>
 
   </div>
@@ -246,6 +287,56 @@ onMounted(() => {
   font-weight: 700;
   cursor: pointer;
   padding: 4px;
+}
+/* ── Selector de Administrador ── */
+.admin-filter-card {
+  margin-bottom: 24px;
+  display: inline-block; /* 👈 EL TRUCO: Evita que se estire al 100% de la pantalla */
+  min-width: 350px;
+  padding: 16px 20px;
+}
+
+.admin-filter-group {
+  margin-bottom: 0; /* Para no dejar espacio extra debajo del select */
+}
+
+.admin-filter-label {
+  font-size: 0.85rem;
+  color: #64748b;
+  margin-bottom: 8px;
+  display: block;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.admin-filter-select {
+  background: #ffffff;
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #334155;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+  outline: none;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.admin-filter-select:hover:not(:disabled) {
+  border-color: #cbd5e1;
+}
+
+.admin-filter-select:focus {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.1);
+}
+
+.admin-filter-select:disabled {
+  background: #f8fafc;
+  color: #94a3b8;
+  cursor: not-allowed;
 }
 
 .btn-add-turno:hover {

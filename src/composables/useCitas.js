@@ -14,9 +14,9 @@ export const ESTADOS_CITA = {
   pendiente:   { label: 'Pendiente',   color: '#f59e0b', bg: '#fef3c7' },
   confirmada:  { label: 'Confirmada',  color: '#10b981', bg: '#d1fae5' },
   en_triaje:   { label: 'En triaje',   color: '#6366f1', bg: '#ede9fe' },
-  en_consulta: { label: 'En consulta', color: '#0ea5e9', bg: '#e0f2fe' },
-  completada:  { label: 'Completada',  color: '#3b82f6', bg: '#dbeafe' },
-  cancelada:   { label: 'Cancelada',   color: '#ef4444', bg: '#fee2e2' },
+  en_consulta: { label: 'En Consulta', color: '#4f46e5', bg: '#e0e7ff' },
+  completada:  { label: 'Atendida',    color: '#16a34a', bg: '#dcfce7' },
+  cancelada:   { label: 'Cancelada',   color: '#dc2626', bg: '#fee2e2' },
   ausente:     { label: 'Ausente',     color: '#6b7280', bg: '#f3f4f6' },
 }
 
@@ -71,7 +71,8 @@ export function useCitas() {
           idcita,
           fecha_hora,
           estado,
-          motivo_consulta,
+          motivo_reserva,
+          motivo_cancelacion,
           paciente_en_sala,
           idpaciente,
           idfisioterapeuta,
@@ -85,6 +86,8 @@ export function useCitas() {
           sintomas,
           diagnostico_descripcion,
           tratamiento_recetado,
+          cantidad_sesiones_recomendadas,
+          frecuencia_sesiones_recomendadas,
           servicio_topico ( idservicio, nombre_servicio, duracion_estimada_minutos ),
           paciente (
             idpaciente,
@@ -206,11 +209,14 @@ export function useCitas() {
     const diaSemana = new Date(Number(yyyy), Number(mm) - 1, Number(dd)).getDay()
     if (diaSemana === 0) return [] // Sin domingo
 
-    const { data: bloques } = await supabase
+    const { data: bloques, error: errBloques } = await supabase
       .from('horario')
       .select('hora_inicio, hora_fin')
       .eq('idfisioterapeuta', idfisioterapeuta)
       .eq('dia_semana', diaSemana)
+
+    console.log(`[DEBUG] Buscando horario para fisio ${idfisioterapeuta}, dia ${diaSemana}`);
+    console.log(`[DEBUG] Respuesta DB (bloques):`, bloques, errBloques);
 
     if (!bloques?.length) return []
 
@@ -233,23 +239,26 @@ export function useCitas() {
     const formatTime = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 
     const slots = []
+    const duracion = Number(duracionMinutos) || 20
+
     for (const bloque of bloques) {
       let actual = parseTime(bloque.hora_inicio)
       const finBloque = parseTime(bloque.hora_fin)
-      while (actual + duracionMinutos <= finBloque) {
-        const finActual = actual + duracionMinutos
+      while (actual + duracion <= finBloque) {
+        const finActual = actual + duracion
         const choque = ocupados.find(o => actual < o.fin && finActual > o.inicio)
-        if (!choque) { slots.push(formatTime(actual)); actual += duracionMinutos }
+        if (!choque) { slots.push(formatTime(actual)); actual += duracion }
         else actual = choque.fin
       }
     }
+    console.log(`[DEBUG] Slots generados:`, slots);
     return slots
   }
 
   // ── crearCita ───────────────────────────────────────────────────────────────
   // [E1] CORREGIDO: idservicio ahora se incluye en el INSERT
   const crearCita = async (payload) => {
-    const { idpaciente, idfisioterapeuta, idservicio, fecha_hora, motivo_consulta = null } = payload
+    const { idpaciente, idfisioterapeuta, idservicio, fecha_hora, motivo_reserva = null } = payload
 
     if (!idpaciente)       { showAlert('Debe seleccionar un paciente.', 'error');       return false }
     if (!idfisioterapeuta) { showAlert('Debe seleccionar un fisioterapeuta.', 'error'); return false }
@@ -269,9 +278,9 @@ export function useCitas() {
         .insert({
           idpaciente,
           idfisioterapeuta,
-          idservicio,        // ← [E1] campo obligatorio que faltaba
+          idservicio,
           fecha_hora,
-          motivo_consulta: motivo_consulta?.trim() || null,
+          motivo_reserva: motivo_reserva?.trim() || null,
           estado: 'pendiente',
         })
         .select()
@@ -370,6 +379,37 @@ export function useCitas() {
     }
   }
 
+  // ── reprogramarCita ──────────────────────────────────────────────────────────
+  const reprogramarCita = async ({ idcita, idfisioterapeuta, nueva_fecha_hora, motivo_reprogramacion }) => {
+    if (!idcita || !nueva_fecha_hora) {
+      showAlert('Faltan datos para reprogramar la cita.', 'error')
+      return false
+    }
+
+    loadingAccion.value = true
+    try {
+      const { error } = await supabase
+        .from('cita')
+        .update({
+          idfisioterapeuta,
+          fecha_hora: nueva_fecha_hora,
+          estado: 'pendiente',
+          motivo_consulta: motivo_reprogramacion ?? null
+        })
+        .eq('idcita', idcita)
+        .in('estado', ['pendiente', 'confirmada'])
+
+      if (error) throw error
+      showAlert('✅ Cita reprogramada exitosamente.', 'success')
+      return true
+    } catch (err) {
+      showAlert('Error al reprogramar: ' + err.message, 'error')
+      return false
+    } finally {
+      loadingAccion.value = false
+    }
+  }
+
   // ── marcarAusente ───────────────────────────────────────────────────────────
   const marcarAusente = async (idcita) => {
     loadingAccion.value = true
@@ -440,7 +480,7 @@ export function useCitas() {
     buscarPacientePorCodigo, buscarPacientePorDNI,
     obtenerSlotsDisponibles,
     crearCita, confirmarCita, registrarCheckIn, avanzarEstado,
-    cancelarCita, marcarAusente,
+    cancelarCita, marcarAusente, reprogramarCita,
     formatFechaHora, getEstadoInfo, nombreCompleto,
     nombrePacienteFlat, nombreFisioFlat, celularPacienteFlat,
     TRANSICIONES_VALIDAS,
