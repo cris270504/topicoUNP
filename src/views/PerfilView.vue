@@ -53,9 +53,9 @@ const fetchPerfilUsuario = async () => {
     // 3. Si el usuario tiene el rol de Paciente, traemos su dirección residencial
     if (userRole.value.toLowerCase() === 'paciente') {
       const { data: paciente } = await supabase
-        .from('Paciente')
+        .from('paciente')
         .select('direccion')
-        .eq('idPaciente', user.id)
+        .eq('idpaciente', user.id)
         .single()
       
       if (paciente) {

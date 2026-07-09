@@ -15,7 +15,7 @@ const irAHistoriaClinica = (id) => {
 // Estados operativos
 const pacientesList = ref([])
 const searchQuery = ref('')
-const isModalOpen = ref(false)
+const isModalOpen = ref(false)  
 const selectedPaciente = ref(null)
 
 const fetchPacientes = async () => {

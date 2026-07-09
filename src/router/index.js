@@ -15,6 +15,12 @@ const router = createRouter({
       meta: { requiresAuth: false }
     },
     {
+      path: '/forzar-cambio-password',
+      name: 'forzar-cambio-password',
+      component: () => import('@/views/ForzarCambioPasswordView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/',
       component: AppLayout,
       meta: { requiresAuth: true },
@@ -34,7 +40,13 @@ const router = createRouter({
           path: 'citas',
           name: 'citas',
           component: () => import('@/views/CitasView.vue'),
-          meta: { roles: ['enfermera', 'fisioterapeuta', 'admin', 'paciente'] }
+          meta: { roles: ['enfermera', 'fisioterapeuta', 'admin'] }
+        },
+        {
+          path: 'mis-reservas',
+          name: 'misreservas',
+          component: () => import('@/views/MisReservasView.vue'),
+          meta: { roles: ['paciente'] }
         },
         {
           path: 'configuracion',
@@ -92,6 +104,21 @@ router.beforeEach(async (to) => {
     return { name: 'login' }
   }
 
+  // 1.5 Si el usuario debe cambiar su contraseña
+  if (user) {
+    const requiereCambio = user.user_metadata?.requiere_cambio_password === true
+    
+    // Si requiere cambio y no está yendo a la vista de cambio de password, forzarlo
+    if (requiereCambio && to.name !== 'forzar-cambio-password') {
+      return { name: 'forzar-cambio-password' }
+    }
+    
+    // Si NO requiere cambio y está intentando ir a la vista de cambio de password, enviarlo al dashboard
+    if (!requiereCambio && to.name === 'forzar-cambio-password') {
+      return { name: 'dashboard' }
+    }
+  }
+
   // 2. Si el usuario ya está logueado e intenta ir al login -> Mandarlo al Dashboard
   if (to.name === 'login' && user) {
     return { name: 'dashboard' }
@@ -100,7 +127,7 @@ router.beforeEach(async (to) => {
   const rolesPermitidos = to.matched.find(record => record.meta.roles)?.meta.roles
 
   if (user && rolesPermitidos) {
-    const rawRol = user.user_metadata?.rol
+    const rawRol = user.user_metadata?.rol || 'paciente'
     const userRol = rawRol === 'fisioterapeuta' ? 'fisioterapeuta' : rawRol
 
     if (userRol === 'admin') {

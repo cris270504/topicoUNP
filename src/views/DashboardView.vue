@@ -1,8 +1,9 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useDashboard } from '@/composables/useDashboard'
-import { ESTADOS_CITA } from '@/composables/useCitas'
+import { ESTADOS_CITA, useCitas } from '@/composables/useCitas'
 import { supabase } from '@/lib/supabaseClient'
+import ModalNuevaCita from '@/components/ModalNuevaCita.vue'
 // 1. Declaramos la variable para que Vue ya no lance el error "not defined"
 const rolUsuario = ref('')
 
@@ -16,15 +17,46 @@ const obtenerRolActual = async () => {
   }
 }
 const {
-  citasHoy, citasProximas, pacientesEnSala, ocupacionPersonal,
+  citasHoy, citasProximas, pacientesEnSala, ocupacionPersonal, indicacionesPendientes,
   resumenEstados, totalCitasHoy, loading, fetchDashboard,
   esPaciente, esPersonalSalud, esAdmin, esEnfermera
 } = useDashboard()
 
+const {
+  fisios, servicios, loadingAccion,
+  fetchFisios, fetchServicios,
+  buscarPacientePorCodigo, buscarPacientePorDNI, obtenerSlotsDisponibles, crearCita
+} = useCitas()
+
+const showModalAgendar = ref(false)
+const datosPrellenados = ref(null)
+
+const agendarRecomendaciones = (cita) => {
+  datosPrellenados.value = {
+    paciente: cita.paciente,
+    idfisioterapeuta: cita.fisioterapeuta?.idfisioterapeuta,
+    idservicio: cita.servicio_topico?.idservicio,
+    cantidadSesiones: cita.cantidad_sesiones_recomendadas
+  }
+  showModalAgendar.value = true
+}
+
+const handleNuevaCita = async (payloads) => {
+  try {
+    for (const p of payloads) {
+      await crearCita(p)
+    }
+  } finally {
+    showModalAgendar.value = false
+    await fetchDashboard() // Refrescar
+  }
+}
+
 onMounted(() => {
-  obtenerRolActual(),
+  obtenerRolActual()
   fetchDashboard()
-  // ... aquí pueden ir tus otras funciones como fetchCitas(), etc.
+  fetchFisios()
+  fetchServicios()
 })
 
 const formatHora = (iso) => {
@@ -160,6 +192,48 @@ const formatFechaCompleta = (iso) => {
           </div>
         </div>
 
+        <div class="data-card" v-if="esAdmin || esEnfermera">
+          <h3>Indicaciones Médicas Pendientes de Agendar</h3>
+          <p class="subtitulo-card">Sesiones de fisioterapia recomendadas por el especialista hoy.</p>
+          
+          <div v-if="indicacionesPendientes.length === 0" class="empty-row">
+            No hay indicaciones pendientes de agendar.
+          </div>
+          <div class="table-responsive" v-else>
+            <table class="content-table">
+              <thead>
+                <tr>
+                  <th>Paciente</th>
+                  <th>Especialista</th>
+                  <th>Indicaciones / Sesiones</th>
+                  <th>Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="c in indicacionesPendientes" :key="'indicacion-' + c.idcita">
+                  <td>
+                    <span class="patient-name">{{ c.paciente?.persona?.nombres }} {{ c.paciente?.persona?.apellidos }}</span>
+                  </td>
+                  <td>{{ c.fisioterapeuta?.persona?.apellidos ?? 'General' }}</td>
+                  <td>
+                    <div style="font-size: 13px; font-weight: bold; color: var(--blue-dark); margin-bottom: 4px;">
+                      {{ c.cantidad_sesiones_recomendadas }} sesiones ({{ c.frecuencia_sesiones_recomendadas }})
+                    </div>
+                    <div style="font-size: 12px; color: var(--gray-600); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">
+                      {{ c.tratamiento_recetado }}
+                    </div>
+                  </td>
+                  <td>
+                    <button class="btn-primary" style="padding: 6px 12px; font-size: 13px;" @click="agendarRecomendaciones(c)">
+                      📅 Agendar Sesiones
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="data-card" v-if="esAdmin || esEnfermera || esPersonalSalud">
           <h3>Ocupación del Personal de Salud — Hoy</h3>
           <div v-if="ocupacionPersonal.length === 0" class="empty-row">
@@ -221,6 +295,19 @@ const formatFechaCompleta = (iso) => {
 
       </div>
     </template>
+
+    <ModalNuevaCita 
+      :isOpen="showModalAgendar" 
+      :initialData="datosPrellenados"
+      :fisios="fisios" 
+      :servicios="servicios" 
+      :loadingAccion="loadingAccion"
+      :obtenerSlots="obtenerSlotsDisponibles" 
+      :onBuscarPorCodigo="buscarPacientePorCodigo" 
+      :onBuscarPorDNI="buscarPacientePorDNI"
+      @close="showModalAgendar = false" 
+      @submit="handleNuevaCita" 
+    />
 
   </div>
 </template>

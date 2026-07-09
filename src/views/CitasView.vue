@@ -17,17 +17,9 @@ const {
   buscarPacientePorCodigo, buscarPacientePorDNI,
   crearCita, registrarCheckIn, cancelarCita, marcarAusente,
   confirmarCita, formatFechaHora, getEstadoInfo, nombreCompleto,
+  obtenerSlotsDisponibles, reprogramarCita,
 } = useCitas()
 
-// Stubs temporales
-const obtenerSlotsDisponibles = async (idFisioterapeuta, fecha, duracion) => {
-  const slots = []
-  for (let h = 8; h < 18; h++) {
-    slots.push(`${String(h).padStart(2, '0')}:00`)
-    slots.push(`${String(h).padStart(2, '0')}:30`)
-  }
-  return slots
-}
 
 const { showAlert, showConfirm } = useAlert()
 
@@ -186,6 +178,14 @@ const handleConfirmarAsistencia = async (sesion) => {
   }
 }
 
+const esDentroDeLaHora = (fecha_hora) => {
+  const citaTime = new Date(fecha_hora).getTime()
+  const now = Date.now()
+  const diffMinutes = (citaTime - now) / 60000
+  // Permite atender desde 60 mins antes hasta 120 mins después de la hora programada
+  return diffMinutes >= -120 && diffMinutes <= 60
+}
+
 const accionesDe = (sesion) => {
   const e = sesion?.estado;
   const enSala = !!sesion?.paciente_en_sala;
@@ -194,11 +194,12 @@ const accionesDe = (sesion) => {
     puedeConfirmarAsistencia: puedeGestionar.value && e === 'pendiente',
     puedeCheckIn: puedeGestionar.value && e === 'confirmada' && !enSala,
     puedeInasistencia: puedeGestionar.value && ['pendiente', 'confirmada'].includes(e) && !enSala,
-    // Permite atender si está en triaje o ya en consulta
-    puedeAtender: esFisioterapeuta.value && ['en_triaje', 'en_consulta'].includes(e),
+    // Permite atender si es fisio y la cita está en estado válido Y está dentro de la ventana de tiempo
+    puedeAtender: esFisioterapeuta.value && ['pendiente', 'confirmada', 'en_triaje', 'en_consulta'].includes(e) && esDentroDeLaHora(sesion.fecha_hora),
     puedeReprogramar: puedeGestionar.value && ['pendiente', 'confirmada'].includes(e) && !enSala,
     puedeCancelar: puedeGestionar.value && ['pendiente', 'confirmada'].includes(e) && !enSala,
     puedeVerRegistro: e === 'completada',
+    puedeVerDetalles: e === 'cancelada',
   }
 }
 
@@ -214,8 +215,8 @@ const verRegistroSesion = async (sesion) => {
 
   try {
     const { data, error } = await supabase
-      .from('Sesion')
-      .select('sintomas, diagnostico_descripcion, tratamiento_recetado, observaciones_internas')
+      .from('cita')
+      .select('diagnostico_descripcion, tratamiento_recetado, observaciones_internas')
       .eq('idcita', sesion.idcita)
       .single();
 
@@ -333,6 +334,7 @@ const obtenerSituacionCita = (sesion) => {
                     <button v-if="accionesDe(sesion).puedeInasistencia" class="accion-btn inasistencia" @click="handleInasistencia(sesion)" :disabled="loadingAccion">❌ Faltó</button>
                     <button v-if="accionesDe(sesion).puedeReprogramar" class="accion-btn reprogramar" @click="abrirModalReprogramar(sesion)">🔄 Reprogramar</button>
                     <button v-if="accionesDe(sesion).puedeCancelar" class="accion-btn cancelar" @click="abrirModalCancelacion(sesion)" :disabled="loadingAccion">🗑 Cancelar</button>
+                    <button v-if="accionesDe(sesion).puedeVerDetalles" class="accion-btn historial" @click="abrirDetalleCalendario(sesion)">👁 Ver Detalle</button>
                   </div>
                 </td>
               </tr>
@@ -390,7 +392,10 @@ const obtenerSituacionCita = (sesion) => {
                 </span>
                 <span v-if="sesionSeleccionada.paciente_en_sala" class="sala-badge" style="display:inline-block; margin-left: 8px;">🟢 En sala</span>
               </p>
-              <p v-if="sesionSeleccionada.motivo_consulta"><strong>Motivo:</strong> {{ sesionSeleccionada.motivo_consulta }}</p>
+              <p><strong>Motivo de Reserva:</strong> {{ sesionSeleccionada.motivo_reserva || 'No especificado' }}</p>
+              <div v-if="sesionSeleccionada.estado === 'cancelada'" style="margin-top: 10px; padding: 10px; background-color: #fee2e2; border-left: 4px solid #ef4444; border-radius: 4px;">
+                <p style="color: #991b1b; margin: 0;"><strong>Motivo de Cancelación:</strong> {{ sesionSeleccionada.motivo_cancelacion || 'Cancelado por sistema' }}</p>
+              </div>
             </div>
 
             <div class="modal-actions" style="margin-top: 20px; justify-content: flex-start; flex-wrap: wrap;" v-if="puedeGestionar || esFisioterapeuta">
@@ -411,53 +416,91 @@ const obtenerSituacionCita = (sesion) => {
       :obtenerSlots="obtenerSlotsDisponibles" :onBuscarPorCodigo="buscarPacientePorCodigo" :onBuscarPorDNI="buscarPacientePorDNI"
       @close="showModalNueva = false" @submit="handleNuevaCita" />
       
-    <ModalReprogramarCita :isOpen="showModalReprogramar" :sesion="sesionSeleccionada" :fisios="fisios"
+    <ModalReprogramarCita :isOpen="showModalReprogramar" :cita="sesionSeleccionada" :fisios="fisios"
       :loadingAccion="loadingAccion" @close="showModalReprogramar = false" @submit="handleReprogramar" />
 
     <!-- ── MODAL: VER REGISTRO DE LA SESIÓN ── -->
     <Transition name="fade-modal">
       <div v-if="showModalRegistro" class="modal-overlay" @click.self="showModalRegistro = false">
-        <div class="modal-window" style="max-width: 500px;">
-          <div class="modal-header">
-            <h3>Registro Clínico de la Sesión</h3>
-            <button class="close-x" @click="showModalRegistro = false">&times;</button>
+        <div class="modal-window modern-modal" style="max-width: 600px; padding: 0;">
+          
+          <div class="modal-header-premium" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 24px; position: relative;">
+            <div style="color: white;">
+              <span style="background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-bottom: 8px; display: inline-block;">Expediente Clínico</span>
+              <h3 style="margin: 0 0 4px 0; font-size: 22px; font-weight: 700; color: white;">Registro de Atención</h3>
+              <p style="margin: 0; font-size: 13.5px; color: #94a3b8;">{{ formatFechaHora(registroSeleccionado?.fecha_hora) }}</p>
+            </div>
+            <button class="close-x" @click="showModalRegistro = false" style="position: absolute; top: 16px; right: 20px; color: rgba(255,255,255,0.6);">&times;</button>
           </div>
 
-          <div class="modal-form" style="padding: 20px;">
-            <div v-if="loadingRegistro" style="text-align: center; color: #64748b;">
-              <span class="spinner" style="display:inline-block; margin-right:8px;"></span> Cargando apuntes...
+          <div class="modal-content-scroll" style="padding: 24px; max-height: 65vh; overflow-y: auto; background: #f8fafc;">
+            <div v-if="loadingRegistro" style="text-align: center; padding: 40px; color: #64748b;">
+              <span class="spinner" style="display:inline-block; margin-right:8px; border-top-color: #3b82f6;"></span> Cargando datos clínicos...
             </div>
 
-            <div v-else-if="registroSeleccionado">
-              <p style="margin-top: 0;"><strong>Paciente:</strong> {{ nombrePacienteFlat(registroSeleccionado) }}</p>
-              <p><strong>Atendido por:</strong> {{ nombreFisioFlat(registroSeleccionado) }}</p>
-              <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 15px 0;">
-
-              <div style="margin-bottom: 16px;">
-                <strong>Síntomas registrados:</strong>
-                <p style="white-space: pre-wrap; font-size: 14px; background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0; margin-top: 4px;">
-                  {{ registroSeleccionado.sintomas || 'Sin síntomas registrados.' }}
-                </p>
+            <div v-else-if="registroSeleccionado" style="display: flex; flex-direction: column; gap: 24px;">
+              
+              <!-- Info Básica -->
+              <div style="display: flex; gap: 20px; background: white; padding: 16px; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                <div style="flex: 1;">
+                  <span style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Paciente</span>
+                  <p style="margin: 4px 0 0 0; font-weight: 600; color: #0f172a;">{{ nombrePacienteFlat(registroSeleccionado) }}</p>
+                </div>
+                <div style="width: 1px; background: #e2e8f0;"></div>
+                <div style="flex: 1;">
+                  <span style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Atendido por</span>
+                  <p style="margin: 4px 0 0 0; font-weight: 600; color: #0f172a;">👨‍⚕️ {{ nombreFisioFlat(registroSeleccionado) }}</p>
+                </div>
               </div>
 
-              <div style="margin-bottom: 16px;">
-                <strong>Diagnóstico:</strong>
-                <p style="white-space: pre-wrap; font-size: 14px; background: #f0fdfa; padding: 10px; border-radius: 6px; border: 1px solid #5eead4; margin-top: 4px;">
-                  {{ registroSeleccionado.diagnostico_descripcion || 'Sin diagnóstico registrado.' }}
-                </p>
+              <!-- Diagnóstico -->
+              <div class="info-section-premium" style="display: flex; gap: 16px;">
+                <div style="width: 44px; height: 44px; border-radius: 10px; background: #fee2e2; color: #ef4444; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px; height:20px;"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+                </div>
+                <div style="flex-grow: 1;">
+                  <h4 style="margin: 0 0 8px 0; font-size: 15px; color: #1e293b;">Diagnóstico y Resultados</h4>
+                  <div style="background: white; padding: 16px; border-radius: 10px; border: 1px solid #e2e8f0; border-left: 4px solid #ef4444; font-size: 14.5px; color: #475569; white-space: pre-wrap; line-height: 1.5; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                    {{ registroSeleccionado.diagnostico_descripcion || 'No se registraron hallazgos.' }}
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <strong>Tratamiento Recetado:</strong>
-                <p style="white-space: pre-wrap; font-size: 14px; background: #fffbeb; padding: 10px; border-radius: 6px; border: 1px solid #fde68a; margin-top: 4px;">
-                  {{ registroSeleccionado.tratamiento_recetado || 'Ningún tratamiento recetado.' }}
-                </p>
+              <!-- Tratamiento -->
+              <div class="info-section-premium" style="display: flex; gap: 16px;">
+                <div style="width: 44px; height: 44px; border-radius: 10px; background: #e0e7ff; color: #6366f1; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px; height:20px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                </div>
+                <div style="flex-grow: 1;">
+                  <h4 style="margin: 0 0 8px 0; font-size: 15px; color: #1e293b;">Tratamiento e Indicaciones (Receta)</h4>
+                  <div style="background: white; padding: 16px; border-radius: 10px; border: 1px solid #e2e8f0; border-left: 4px solid #6366f1; font-size: 14.5px; color: #475569; white-space: pre-wrap; line-height: 1.5; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                    {{ registroSeleccionado.tratamiento_recetado || 'Ningún tratamiento recetado.' }}
+                  </div>
+                </div>
               </div>
+
+              <!-- Apuntes Internos -->
+              <div class="info-section-premium" v-if="registroSeleccionado.observaciones_internas" style="display: flex; gap: 16px;">
+                <div style="width: 44px; height: 44px; border-radius: 10px; background: #f1f5f9; color: #475569; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px; height:20px;"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                </div>
+                <div style="flex-grow: 1;">
+                  <h4 style="margin: 0 0 8px 0; font-size: 15px; color: #1e293b;">Apuntes Internos <span style="font-size: 11px; font-weight: normal; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; margin-left: 6px;">Privado</span></h4>
+                  <div style="background: white; padding: 16px; border-radius: 10px; border: 1px solid #e2e8f0; font-size: 14.5px; color: #475569; white-space: pre-wrap; line-height: 1.5; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                    {{ registroSeleccionado.observaciones_internas }}
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
 
-          <div class="modal-actions" style="padding: 15px; border-top: 1px solid #eee;">
-            <button class="btn-secondary" @click="showModalRegistro = false">Cerrar</button>
+          <div class="modal-footer-premium" style="padding: 20px 24px; background: white; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+            <button class="btn-primary" style="background: var(--blue-dark); border: none; padding: 12px 24px; border-radius: 8px; display: flex; gap: 8px; align-items: center;" @click="router.push(`/atencion/${registroSeleccionado.idcita}`)">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+              Editar Ficha Integral
+            </button>
+            <button class="btn-secondary" style="padding: 12px 24px; border-radius: 8px;" @click="showModalRegistro = false">Cerrar</button>
           </div>
         </div>
       </div>

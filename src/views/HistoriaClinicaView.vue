@@ -22,36 +22,36 @@ const cargarHistorial = async () => {
     try {
         // 1. Cargar datos básicos del Paciente
         const { data: dataPaciente, error: errPaciente } = await supabase
-            .from('Paciente')
+            .from('paciente')
             .select(`
-                idPaciente,
-                Persona (nombres, apellidos, numero_documento, fecha_nacimiento, celular)
+                idpaciente,
+                persona (nombres, apellidos, numero_documento, fecha_nacimiento, celular)
             `)
-            .eq('idPaciente', idPaciente)
+            .eq('idpaciente', idPaciente)
             .single()
             
         if (errPaciente) throw errPaciente
-        paciente.value = dataPaciente.Persona
+        paciente.value = dataPaciente.persona
 
-        // 2. Cargar TODAS las sesiones ATENDIDAS de este paciente
+        // 2. Cargar TODAS las citas COMPLETADAS de este paciente
         const { data: dataSesiones, error: errSesiones } = await supabase
-            .from('Sesion')
+            .from('cita')
             .select(`
-                idSesion, idTratamiento, numero_sesion, fecha_hora, tipo, 
-                es_evaluacion_inicial, notas_evolucion, indicaciones, evolucion_clinica,
-                Fisioterapeuta ( Persona (nombres, apellidos) )
+                idcita, fecha_hora, estado, diagnostico_descripcion, tratamiento_recetado, observaciones_internas,
+                fisioterapeuta ( persona (nombres, apellidos) ),
+                servicio_topico ( nombre_servicio )
             `)
-            .eq('idPaciente', idPaciente)
-            .eq('estado', 'atendida')
+            .eq('idpaciente', idPaciente)
+            .eq('estado', 'completada')
             .order('fecha_hora', { ascending: false }) // Cronológico inverso (más reciente primero)
 
         if (errSesiones) throw errSesiones
         sesionesRaw.value = dataSesiones
 
-        // 3. Cargar las Evaluaciones Iniciales (Fichas) de este paciente
+        // 3. Cargar las Evaluaciones Iniciales (Fichas) de este paciente para tener el historial robusto
         const { data: dataEvaluaciones, error: errEval } = await supabase
             .from('Evaluacion_inicial')
-            .select('idSesion, idTratamiento, diagnostico_fisioterapeutico, motivo_paciente')
+            .select('idSesion')
             .eq('idPaciente', idPaciente)
 
         if (errEval) throw errEval
@@ -64,38 +64,24 @@ const cargarHistorial = async () => {
     }
 }
 
-// ── AGRUPACIÓN POR TRATAMIENTO ──
-// Toma todas las sesiones y las agrupa bajo su respectivo "Episodio Clínico"
+// ── AGRUPACIÓN ──
+// Simplificado: mostramos todas las atenciones cronológicamente
 const historialAgrupado = computed(() => {
-    const grupos = {}
-
-    sesionesRaw.value.forEach(sesion => {
-        // Usamos idTratamiento como llave. Si es null, lo mandamos a un grupo "General"
-        const keyId = sesion.idTratamiento || 'general'
-        
-        if (!grupos[keyId]) {
-            // Buscamos si existe la Ficha Madre para este tratamiento
-            const fichaMadre = evaluacionesRaw.value.find(e => e.idTratamiento === sesion.idTratamiento)
-            
-            grupos[keyId] = {
-                idTratamiento: sesion.idTratamiento,
-                // Usamos el diagnóstico como título si existe, sino un nombre genérico
-                titulo: fichaMadre?.diagnostico_fisioterapeutico || (keyId === 'general' ? 'Atenciones Generales' : `Episodio Clínico #${keyId}`),
-                motivo: fichaMadre?.motivo_paciente || null,
-                idSesionFicha: fichaMadre?.idSesion || null,
-                sesiones: []
-            }
-        }
-        
-        grupos[keyId].sesiones.push(sesion)
-    })
-
-    return Object.values(grupos)
+    if (sesionesRaw.value.length === 0) return []
+    return [{
+        titulo: 'Historial de Atenciones Clínicas',
+        sesiones: sesionesRaw.value
+    }]
 })
 
-const abrirFichaMadre = (idSesionOriginal) => {
-    // Le pasamos el ID de la sesión donde se creó la evaluación al modal
-    sesionEvalParaModal.value = sesionesRaw.value.find(s => s.idSesion === idSesionOriginal)
+// Funciones para manejar las Fichas Integrales
+const tieneFichaIntegral = (idcita) => {
+    return evaluacionesRaw.value.some(e => e.idSesion === idcita)
+}
+
+const abrirFichaMadre = (idcita) => {
+    // Le pasamos la cita original donde se creó la evaluación al modal
+    sesionEvalParaModal.value = sesionesRaw.value.find(s => s.idcita === idcita)
     showModalFicha.value = true
 }
 
@@ -161,44 +147,44 @@ onMounted(() => { cargarHistorial() })
                     
                     <div class="tratamiento-header">
                         <div class="tratamiento-titulos">
-                            <span class="badge-episodio">Episodio / Tratamiento</span>
                             <h4 class="diagnostico">{{ grupo.titulo }}</h4>
-                            <p v-if="grupo.motivo" class="motivo"><strong>Motivo original:</strong> {{ grupo.motivo }}</p>
+                            <p class="motivo">Trazabilidad completa de atenciones y resultados del paciente.</p>
                         </div>
-                        <button v-if="grupo.idSesionFicha" class="btn-ver-ficha" @click="abrirFichaMadre(grupo.idSesionFicha)">
-                            Ver Ficha Inicial
-                        </button>
                     </div>
 
                     <div class="timeline-container">
-                        <div v-for="sesion in grupo.sesiones" :key="sesion.idSesion" class="timeline-node">
+                        <div v-for="sesion in grupo.sesiones" :key="sesion.idcita" class="timeline-node">
                             <div class="timeline-dot"></div>
                             
                             <div class="sesion-card">
                                 <div class="sesion-head">
-                                    <span class="fecha">{{ formatearFecha(sesion.fecha_hora) }}</span>
-                                    <span class="sesion-numero">
-                                        {{ sesion.es_evaluacion_inicial ? 'Evaluación' : `Sesión #${sesion.numero_sesion}` }}
-                                    </span>
+                                    <div class="head-left">
+                                        <span class="fecha">{{ formatearFecha(sesion.fecha_hora) }}</span>
+                                        <span class="sesion-numero">
+                                            {{ sesion.servicio_topico?.nombre_servicio || 'Atención' }}
+                                        </span>
+                                    </div>
+                                    <button v-if="tieneFichaIntegral(sesion.idcita)" class="btn-ver-ficha-small" @click.stop="abrirFichaMadre(sesion.idcita)">
+                                        📄 Ver Ficha Integral
+                                    </button>
                                 </div>
                                 
                                 <div class="fisio-name">
-                                    👨‍⚕️ Atendido por: {{ sesion.Fisioterapeuta?.Persona?.nombres }} {{ sesion.Fisioterapeuta?.Persona?.apellidos }}
-                                </div>
-
-                                <div v-if="sesion.evolucion_clinica && sesion.evolucion_clinica.eva !== undefined" class="metricas-rapidas">
-                                    <span class="metrica-badge eva">Dolor EVA: <strong>{{ sesion.evolucion_clinica.eva }}/10</strong></span>
-                                    <span class="metrica-badge estado" :class="sesion.evolucion_clinica.funcion">Estado: <strong>{{ sesion.evolucion_clinica.funcion }}</strong></span>
+                                    👨‍⚕️ Atendido por: {{ sesion.fisioterapeuta?.persona?.nombres }} {{ sesion.fisioterapeuta?.persona?.apellidos }}
                                 </div>
 
                                 <div class="sesion-notas">
-                                    <p v-if="sesion.notas_evolucion" class="nota-texto">
-                                        <strong>Evolución / Procedimiento:</strong><br/>
-                                        {{ sesion.notas_evolucion }}
+                                    <p v-if="sesion.diagnostico_descripcion" class="nota-texto">
+                                        <strong>Resultados / Diagnóstico:</strong><br/>
+                                        {{ sesion.diagnostico_descripcion }}
                                     </p>
-                                    <p v-if="sesion.indicaciones" class="nota-texto indicaciones">
-                                        <strong>Indicaciones para casa:</strong><br/>
-                                        {{ sesion.indicaciones }}
+                                    <p v-if="sesion.tratamiento_recetado" class="nota-texto indicaciones">
+                                        <strong>Indicaciones Médicas:</strong><br/>
+                                        {{ sesion.tratamiento_recetado }}
+                                    </p>
+                                    <p v-if="sesion.observaciones_internas" class="nota-texto">
+                                        <strong>Apuntes internos:</strong><br/>
+                                        {{ sesion.observaciones_internas }}
                                     </p>
                                 </div>
                             </div>
@@ -219,10 +205,9 @@ onMounted(() => { cargarHistorial() })
                     </div>
                     <div class="modal-form" style="overflow-y: auto; padding: 20px;">
                         <FichaEvaluacionInicial 
-                            :idSesion="sesionEvalParaModal.idSesion"
-                            :idTratamiento="sesionEvalParaModal.idTratamiento"
+                            :idSesion="sesionEvalParaModal.idcita"
                             :idPaciente="idPaciente"
-                            :idFisioterapeuta="sesionEvalParaModal.idFisioterapeuta || 'sys'"
+                            :idFisioterapeuta="sesionEvalParaModal.idfisioterapeuta || 'sys'"
                             :modoLectura="true" 
                         />
                     </div>
@@ -285,6 +270,12 @@ onMounted(() => { cargarHistorial() })
 }
 .btn-ver-ficha:hover { background: #99f6e4; }
 
+.btn-ver-ficha-small {
+    background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;
+    padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.2s;
+}
+.btn-ver-ficha-small:hover { background: #bae6fd; }
+
 /* ── LÍNEA DE TIEMPO (TIMELINE) ── */
 .timeline-container { position: relative; padding-left: 20px; }
 .timeline-container::before {
@@ -305,7 +296,8 @@ onMounted(() => { cargarHistorial() })
 .sesion-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; transition: transform 0.2s; }
 .sesion-card:hover { transform: translateX(4px); border-color: #cbd5e1; }
 
-.sesion-head { display: flex; justify-content: space-between; margin-bottom: 8px; }
+.sesion-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+.head-left { display: flex; flex-direction: column; gap: 4px; }
 .sesion-head .fecha { font-weight: 700; color: #334155; font-size: 15px; }
 .sesion-head .sesion-numero { background: #e2e8f0; color: #475569; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 12px; }
 
