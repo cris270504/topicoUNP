@@ -193,6 +193,15 @@ const handleSubmit = async () => {
             // Si todo salió bien, procedemos con el INSERT en la tabla paciente
             const nuevoUid = data.user_id
 
+            // Actualización de seguridad: Aseguramos que celular y fecha de nacimiento se guarden
+            // explícitamente en la tabla persona, en caso la Edge function los esté omitiendo.
+            const { error: errUpdatePersona } = await supabase.from('persona').update({
+                celular: celular.value || null,
+                fecha_nacimiento: fechaNacimiento.value || null
+            }).eq('idpersona', nuevoUid)
+            
+            if (errUpdatePersona) console.error("Error al forzar datos en persona:", errUpdatePersona)
+
             const { error: errPaciente } = await supabase.from('paciente').insert({
                 idpaciente: nuevoUid,
                 codigo_universitario: codigoTrim,

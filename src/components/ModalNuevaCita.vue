@@ -1,19 +1,4 @@
 <script setup>
-/**
- * ModalNuevaCita.vue — Sistema Tópico Universitario
- *
- * CAMBIOS RESPECTO AL MODAL ANTERIOR:
- * - Sin modalidades de atención (se elimina esa sección completa)
- * - Sin lógica de paquetes, saldo, tratamientos ni sesiones múltiples
- * - Búsqueda de paciente bifurcada por tipo:
- *     estudiante         → escribe código universitario, BD busca en paciente.codigo_universitario
- *     docente/admin      → escribe DNI, BD busca en persona.numero_documento via JOIN
- * - Selector de tipo de usuario antes del campo de búsqueda
- * - idservicio es obligatorio (mapeado desde servicio_topico)
- * - Duración del slot viene del servicio seleccionado, no hardcodeada
- * - motivo_consulta como campo opcional pero expuesto
- * - dia_semana 1-6 (sin domingo)
- */
 import { ref, computed, watch } from 'vue'
 import { TIPOS_USUARIO } from '@/composables/useCitas'
 import { getTodayISO } from '@/lib/dateUtils'
@@ -22,103 +7,109 @@ const props = defineProps({
   isOpen: { type: Boolean, required: true },
   fisios: { type: Array, default: () => [] },
   pacientes: { type: Array, default: () => [] },
-  paquetes: { type: Array, default: () => [] },
-  servicios: { type: Array, default: () => [] }, // catálogo de servicio_topico
+  servicios: { type: Array, default: () => [] },
   loadingAccion: { type: Boolean, default: false },
-  saldoPaciente: { type: Object, default: null },
   obtenerSlots: { type: Function, required: true },
   onBuscarPorCodigo: { type: Function, required: true },
   onBuscarPorDNI: { type: Function, required: true },
-  onFetchSaldoPaciente: { type: Function, required: false },
-  onFetchEvaluaciones: { type: Function, required: false },
-  tratamientoARecargar: { type: Object, default: null },
 })
 
-const emit = defineEmits(['close', 'submit', 'fisio-changed', 'reset-saldo'])
+const emit = defineEmits(['close', 'submit', 'fisio-changed'])
 
 // ── Campos del formulario ────────────────────────────────────────────────────
-const tipoBusqueda = ref(null)     // 'estudiante' | 'docente' | 'administrativo'
-const terminoBusqueda = ref('')       // lo que escribe el usuario en el campo de búsqueda
+const tipoBusqueda = ref(null)
+const terminoBusqueda = ref('')
 const resultadosBusqueda = ref([])
 const buscando = ref(false)
-const pacienteSeleccionado = ref(null) // objeto completo del paciente elegido
+const pacienteSeleccionado = ref(null)
 
-const idFisioterapeuta = ref(null)
-const idServicio = ref(null)
-const fecha = ref('')
-const hora = ref('')
+const idfisioterapeuta = ref(null)
+const idservicio = ref(null)
 const motivoConsulta = ref('')
 
-// ── Computed ─────────────────────────────────────────────────────────────────
+// ── Lógica Dinámica de Múltiples Sesiones ────────────────────────────────────
+const cantidadSesiones = ref(1)
+const sesiones = ref([{ fecha: '', hora: '', slots: [], loading: false }])
 const fechaMin = computed(() => getTodayISO())
 
-const labelBusqueda = computed(() => {
-  if (!tipoBusqueda.value) return ''
-  return tipoBusqueda.value === 'estudiante'
-    ? 'Código universitario'
-    : 'Número de DNI'
+const esSesionFisioterapia = computed(() => {
+  if (!idservicio.value) return false
+  const serv = props.servicios.find(s => s.idservicio === idservicio.value)
+  if (!serv) return false
+
+  const nombreNormalizado = (serv.nombre_servicio || '').toLowerCase()
+  return nombreNormalizado.includes('fisioterapia') || nombreNormalizado.includes('sesion')
 })
 
-const placeholderBusqueda = computed(() => {
-  if (!tipoBusqueda.value) return ''
-  return tipoBusqueda.value === 'estudiante'
-    ? 'Ej: 20201234A'
-    : 'Ej: 12345678'
+watch(cantidadSesiones, (nuevaCantidad) => {
+  const cant = Math.max(1, Math.min(20, nuevaCantidad || 1))
+  const diff = cant - sesiones.value.length
+
+  if (diff > 0) {
+    for (let i = 0; i < diff; i++) sesiones.value.push({ fecha: '', hora: '', slots: [], loading: false })
+  } else if (diff < 0) {
+    sesiones.value.splice(cant)
+  }
 })
 
-// Duración del servicio seleccionado (para calcular los slots correctamente)
+watch(esSesionFisioterapia, (esFisio) => {
+  if (!esFisio) cantidadSesiones.value = 1
+})
+
 const duracionServicio = computed(() => {
-  if (!idServicio.value) return 20
-  return props.servicios.find(s => s.idservicio === idServicio.value)?.duracion_estimada_minutos ?? 20
+  if (!idservicio.value) return 20
+  return props.servicios.find(s => s.idservicio === idservicio.value)?.duracion_estimada_minutos ?? 20
 })
 
-// ── Slots disponibles ────────────────────────────────────────────────────────
-const slotsDisponibles = ref([])
-const loadingSlots = ref(false)
+// ── Búsqueda de Horarios (Slots) por Fila ────────────────────────────────────
+const isDomingo = (fechaString) => {
+  if (!fechaString) return false
+  const [y, m, d] = fechaString.split('-')
+  return new Date(Number(y), Number(m) - 1, Number(d)).getDay() === 0
+}
 
-// Filtra slots pasados si la fecha es hoy
-const slotsFiltrados = computed(() => {
-  if (loadingSlots.value || !slotsDisponibles.value.length) return slotsDisponibles.value
+const fetchSlotsForRow = async (index) => {
+  const row = sesiones.value[index]
 
-  const hoy = getTodayISO()
-  if (fecha.value !== hoy) return slotsDisponibles.value
-
-  const ahora = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Lima' }))
-  const hh = ahora.getHours()
-  const mm = ahora.getMinutes()
-
-  return slotsDisponibles.value.filter(slot => {
-    const [h, m] = slot.split(':').map(Number)
-    return h > hh || (h === hh && m > mm)
-  })
-})
-
-// Recarga slots cuando cambia el fisio, la fecha o el servicio
-watch([idFisioterapeuta, fecha, idServicio], async ([fisio, f, serv]) => {
-  slotsDisponibles.value = []
-  hora.value = ''
-  if (!fisio || !f || !serv) return
-
-  // Verificar que no sea domingo (JS: 0=Dom)
-  const [y, m, d] = f.split('-')
-  const diaSemana = new Date(Number(y), Number(m) - 1, Number(d)).getDay()
-  if (diaSemana === 0) {
-    slotsDisponibles.value = []
+  if (!idfisioterapeuta.value || !row.fecha || isDomingo(row.fecha)) {
+    row.slots = []
+    row.hora = ''
     return
   }
 
-  loadingSlots.value = true
+  row.loading = true
   try {
-    slotsDisponibles.value = await props.obtenerSlots(fisio, f, duracionServicio.value)
+    row.slots = await props.obtenerSlots(idfisioterapeuta.value, row.fecha, duracionServicio.value)
   } finally {
-    loadingSlots.value = false
+    row.loading = false
+  }
+}
+
+const getSlotsFiltrados = (index) => {
+  const row = sesiones.value[index]
+  if (row.loading || !row.slots.length) return row.slots
+
+  const limaTimeStr = new Date().toLocaleString('sv-SE', { timeZone: 'America/Lima' })
+  const [hoyPeru, horaPeru] = limaTimeStr.split(' ')
+
+  if (row.fecha !== hoyPeru) return row.slots
+
+  const [hh, mm] = horaPeru.split(':').map(Number)
+  return row.slots.filter(slot => {
+    const [h, m] = slot.split(':').map(Number)
+    return h > hh || (h === hh && m > mm)
+  })
+}
+
+watch(idfisioterapeuta, (val) => {
+  if (val) {
+    emit('fisio-changed', val)
+    sesiones.value.forEach((_, i) => fetchSlotsForRow(i))
   }
 })
 
-// ── Búsqueda dinámica ────────────────────────────────────────────────────────
-// Timer de debounce para no disparar una query por cada tecla
+// ── Búsqueda dinámica de Pacientes ───────────────────────────────────────────
 let timerBusqueda = null
-
 const onInputBusqueda = (valor) => {
   terminoBusqueda.value = valor
   pacienteSeleccionado.value = null
@@ -138,22 +129,13 @@ const onInputBusqueda = (valor) => {
     } finally {
       buscando.value = false
     }
-  }, 350) // 350ms de debounce: balance entre responsividad y carga al servidor
+  }, 350)
 }
-
-// Al cambiar el tipo, resetea el campo de búsqueda para no mezclar datos
-watch(tipoBusqueda, () => {
-  terminoBusqueda.value = ''
-  resultadosBusqueda.value = []
-  pacienteSeleccionado.value = null
-})
 
 const seleccionarPaciente = (p) => {
   pacienteSeleccionado.value = p
   resultadosBusqueda.value = []
-  // Muestra en el input el nombre del paciente una vez seleccionado
-  const nombre = `${p.persona?.nombres ?? ''} ${p.persona?.apellidos ?? ''}`.trim()
-  terminoBusqueda.value = nombre
+  terminoBusqueda.value = `${p.persona?.nombres ?? ''} ${p.persona?.apellidos ?? ''}`.trim()
 }
 
 const limpiarPaciente = () => {
@@ -162,14 +144,13 @@ const limpiarPaciente = () => {
   resultadosBusqueda.value = []
 }
 
-// Auto-selecciona el primer servicio cuando se cargue la lista
 watch(() => props.servicios, (lista) => {
-  if (lista?.length && !idServicio.value) {
-    idServicio.value = lista[0].idservicio
+  if (lista?.length && !idservicio.value) {
+    idservicio.value = lista[0].idservicio
   }
 }, { immediate: true })
 
-// ── Reseteo del formulario ───────────────────────────────────────────────────
+// ── Reseteo y Envío ───────────────────────────────────────────────────────────
 watch(() => props.isOpen, (abierto) => {
   if (abierto) resetForm()
 })
@@ -179,101 +160,49 @@ const resetForm = () => {
   terminoBusqueda.value = ''
   resultadosBusqueda.value = []
   pacienteSeleccionado.value = null
-  idFisioterapeuta.value = null
-  idServicio.value = props.servicios?.[0]?.idservicio ?? null
-  fecha.value = ''
-  hora.value = ''
+  idfisioterapeuta.value = null
+  idservicio.value = props.servicios?.[0]?.idservicio || null
   motivoConsulta.value = ''
-  slotsDisponibles.value = []
+  cantidadSesiones.value = 1
+  sesiones.value = [{ fecha: '', hora: '', slots: [], loading: false }]
 }
 
-// ── Envío ────────────────────────────────────────────────────────────────────
 const handleSubmit = () => {
-  if (!pacienteSeleccionado.value) {
-    return // el botón ya está disabled, pero como seguro extra
-  }
+  if (!pacienteSeleccionado.value || !formularioValido.value) return
 
-  emit('submit', {
+  const payloadCitas = sesiones.value.map(sesion => ({
     idpaciente: pacienteSeleccionado.value.idpaciente,
-    idfisioterapeuta: idFisioterapeuta.value,
-    idservicio: idServicio.value,
-    fecha_hora: `${fecha.value}T${hora.value}:00-05:00`,
+    idfisioterapeuta: idfisioterapeuta.value,
+    idservicio: idservicio.value,
+    fecha_hora: `${sesion.fecha}T${sesion.hora}:00-05:00`,
     motivo_consulta: motivoConsulta.value || null,
-  })
+  }))
+
+  emit('submit', payloadCitas)
 }
 
-// ── Helpers de display ───────────────────────────────────────────────────────
+// ── Helpers y Validaciones ────────────────────────────────────────────────────
+const labelBusqueda = computed(() => tipoBusqueda.value === 'estudiante' ? 'Código universitario' : 'Número de DNI')
+const placeholderBusqueda = computed(() => tipoBusqueda.value === 'estudiante' ? 'Ej: 20201234A' : 'Ej: 12345678')
+
 const nombreFisio = (f) => {
   if (!f) return ''
-  const persona = f.persona ?? f.Persona ?? {}
-  const nombres = persona?.nombres ?? ''
-  const apellidos = persona?.apellidos ?? ''
-  const especialidad = f.especialidad ?? f.fisio_especialidad ?? ''
-  return `${nombres} ${apellidos}`.trim() + (especialidad ? ` — ${especialidad}` : '')
+  const persona = f.persona ?? {}
+  return `${persona?.nombres ?? ''} ${persona?.apellidos ?? ''}`.trim() + (f.especialidad ? ` — ${f.especialidad}` : '')
 }
 
-const labelTipoBusqueda = (id) =>
-  TIPOS_USUARIO.find(t => t.id === id)?.label ?? id
+const labelTipoBusqueda = (id) => TIPOS_USUARIO.find(t => t.id === id)?.label ?? id
 
-// Texto del label de resultado en la lista desplegable
 const labelResultado = (p) => {
   const nombre = `${p.persona?.nombres ?? ''} ${p.persona?.apellidos ?? ''}`.trim()
-  if (tipoBusqueda.value === 'estudiante') {
-    return { principal: nombre, secundario: `Cód: ${p.codigo_universitario} · ${p.facultad_escuela}` }
-  }
-  return { principal: nombre, secundario: `DNI: ${p.persona?.numero_documento} · ${p.facultad_escuela}` }
+  return tipoBusqueda.value === 'estudiante'
+    ? { principal: nombre, secundario: `Cód: ${p.codigo_universitario} · ${p.facultad_escuela}` }
+    : { principal: nombre, secundario: `DNI: ${p.persona?.numero_documento} · ${p.facultad_escuela}` }
 }
 
-// Determina si el día seleccionado es domingo (bloqueado)
-const esDomingo = computed(() => {
-  if (!fecha.value) return false
-  const [y, m, d] = fecha.value.split('-')
-  return new Date(Number(y), Number(m) - 1, Number(d)).getDay() === 0
-})
-
-// ── Validación del botón de envío ────────────────────────────────────────────
-const formularioValido = computed(() =>
-  !!pacienteSeleccionado.value &&
-  !!idFisioterapeuta.value &&
-  !!fecha.value &&
-  !!hora.value &&
-  !esDomingo.value
-)
-
-// Cuando cambia el fisioterapeuta seleccionado, avisamos al padre
-watch(idFisioterapeuta, (val) => {
-  if (val) emit('fisio-changed', val)
-})
-
-// Cuando cambia el paciente seleccionado, pedimos saldo y avisamos para resetear saldo si quedó nulo
-watch(pacienteSeleccionado, (p) => {
-  if (!p) {
-    emit('reset-saldo')
-    return
-  }
-
-  const id = p.idpaciente ?? p.idPaciente ?? p.id
-  if (props.onFetchSaldoPaciente && id) {
-    try { props.onFetchSaldoPaciente(id) } catch (e) { /* noop */ }
-  }
-  if (props.onFetchEvaluaciones && id) {
-    try { props.onFetchEvaluaciones(id) } catch (e) { /* noop */ }
-  }
-})
-
-// Si el padre pre-configura `tratamientoARecargar`, aplicamos selección inicial
-watch(() => props.tratamientoARecargar, (t) => {
-  if (!t) return
-  // puede venir con idPaciente / idpaciente y nombres
-  if (t.idPaciente || t.idpaciente) {
-    pacienteSeleccionado.value = { idpaciente: t.idPaciente ?? t.idpaciente, persona: { nombres: t.nombrePaciente ?? '', apellidos: '' } }
-  }
-  if (t.idFisioterapeuta || t.idFisioterapeuta === 0 || t.idfisioterapeuta) {
-    idFisioterapeuta.value = t.idFisioterapeuta ?? t.idfisioterapeuta
-  }
-  // solicitar saldo si corresponde
-  const id = t.idPaciente ?? t.idpaciente
-  if (id && props.onFetchSaldoPaciente) props.onFetchSaldoPaciente(id)
+const formularioValido = computed(() => {
+  if (!pacienteSeleccionado.value || !idfisioterapeuta.value) return false
+  return sesiones.value.every(s => s.fecha && s.hora && !isDomingo(s.fecha))
 })
 </script>
 
@@ -281,7 +210,6 @@ watch(() => props.tratamientoARecargar, (t) => {
   <Transition name="fade-modal">
     <div v-if="isOpen" class="modal-overlay" @click.self="emit('close')">
       <div class="modal-window modal-cita">
-
         <div class="modal-header">
           <h3>Registrar Nueva Cita</h3>
           <button class="close-x" @click="emit('close')" :disabled="loadingAccion">&times;</button>
@@ -289,11 +217,8 @@ watch(() => props.tratamientoARecargar, (t) => {
 
         <form @submit.prevent="handleSubmit" class="modal-form" novalidate>
 
-          <!-- ── Sección 1: Paciente ─────────────────────────────────────── -->
           <div class="form-section">
             <p class="section-label">1. Paciente</p>
-
-            <!-- Paso 1-A: Tipo de usuario -->
             <div class="input-group">
               <label>Tipo de usuario <span class="req">*</span></label>
               <div class="tipo-usuario-grid">
@@ -304,133 +229,117 @@ watch(() => props.tratamientoARecargar, (t) => {
               </div>
             </div>
 
-            <!-- Paso 1-B: Campo de búsqueda (aparece cuando hay tipo seleccionado) -->
             <Transition name="slide-input">
               <div v-if="tipoBusqueda" class="input-group" style="position: relative;">
                 <label>{{ labelBusqueda }} <span class="req">*</span></label>
-
-                <!-- Si ya hay paciente seleccionado, mostramos chip y botón de limpiar -->
                 <div v-if="pacienteSeleccionado" class="paciente-chip">
                   <div class="chip-info">
                     <span class="chip-nombre">
                       {{ pacienteSeleccionado.persona?.nombres }} {{ pacienteSeleccionado.persona?.apellidos }}
                     </span>
                     <span class="chip-detalle">
-                      {{ labelTipoBusqueda(tipoBusqueda) }}
-                      ·
-                      {{ tipoBusqueda === 'estudiante'
-                        ? pacienteSeleccionado.codigo_universitario
-                        : pacienteSeleccionado.persona?.numero_documento }}
+                      {{ labelTipoBusqueda(tipoBusqueda) }} ·
+                      {{ tipoBusqueda === 'estudiante' ? pacienteSeleccionado.codigo_universitario : pacienteSeleccionado.persona?.numero_documento }}
                       · {{ pacienteSeleccionado.facultad_escuela }}
                     </span>
                   </div>
-                  <button type="button" class="chip-clear" @click="limpiarPaciente" title="Cambiar paciente">
-                    &times;
-                  </button>
+                  <button type="button" class="chip-clear" @click="limpiarPaciente" title="Cambiar paciente">&times;</button>
                 </div>
 
-                <!-- Campo de búsqueda activo cuando no hay paciente seleccionado -->
                 <template v-else>
                   <input type="text" class="search-input" :placeholder="placeholderBusqueda" :value="terminoBusqueda"
                     @input="onInputBusqueda($event.target.value)" autocomplete="off" />
                   <span v-if="buscando" class="search-spinner">⏳</span>
-                  <p v-if="terminoBusqueda.length > 0 && terminoBusqueda.length < 3" class="field-hint">
-                    Escribe al menos 3 caracteres para buscar.
-                  </p>
-
-                  <!-- Dropdown de resultados -->
                   <ul v-if="resultadosBusqueda.length > 0" class="options-list">
                     <li v-for="p in resultadosBusqueda" :key="p.idpaciente" @click="seleccionarPaciente(p)">
                       <div class="li-name">{{ labelResultado(p).principal }}</div>
                       <div class="li-sub">{{ labelResultado(p).secundario }}</div>
                     </li>
                   </ul>
-
-                  <p v-else-if="!buscando && terminoBusqueda.length >= 3 && resultadosBusqueda.length === 0"
-                    class="field-hint warn">
-                    No se encontró ningún paciente con ese {{ labelBusqueda.toLowerCase() }}.
-                  </p>
                 </template>
               </div>
             </Transition>
           </div>
 
-          <!-- ── Sección 2: Servicio y Fisioterapeuta ───────────────────── -->
           <div class="form-section">
             <p class="section-label">2. Servicio y especialista</p>
             <div class="form-grid">
-
+              <div class="input-group">
+                <label>Servicio <span class="req">*</span></label>
+                <select v-model="idservicio" required>
+                  <option :value="null" disabled>— Seleccionar servicio —</option>
+                  <option v-for="s in servicios" :key="s.idservicio" :value="s.idservicio">
+                    {{ s.nombre_servicio }}
+                  </option>
+                </select>
+              </div>
               <div class="input-group">
                 <label>Fisioterapeuta <span class="req">*</span></label>
-                <select v-model="idFisioterapeuta" required>
+                <select v-model="idfisioterapeuta" required>
                   <option :value="null" disabled>— Seleccionar especialista —</option>
-                  <option v-for="f in fisios" :key="f.idFisioterapeuta ?? f.idfisioterapeuta"
-                    :value="f.idFisioterapeuta ?? f.idfisioterapeuta">
+                  <option v-for="f in fisios" :key="f.idfisioterapeuta" :value="f.idfisioterapeuta">
                     {{ nombreFisio(f) }}
                   </option>
                 </select>
               </div>
 
+              <div v-if="esSesionFisioterapia" class="input-group" style="grid-column: 1 / -1;">
+                <label>Cantidad de sesiones <span class="req">*</span></label>
+                <input type="number" v-model.number="cantidadSesiones" min="1" max="20" required />
+                <p class="field-hint">Se configurarán los horarios individualmente por sesión.</p>
+              </div>
             </div>
           </div>
 
-          <!-- ── Sección 3: Fecha y horario ─────────────────────────────── -->
           <div class="form-section">
-            <p class="section-label">3. Fecha y horario</p>
-            <div class="form-grid">
-
-              <div class="input-group">
-                <label>Fecha <span class="req">*</span></label>
-                <input type="date" v-model="fecha" :min="fechaMin" required />
-                <p v-if="esDomingo" class="field-hint warn">
-                  ⚠️ El tópico no atiende los domingos. Selecciona otro día.
-                </p>
+            <p class="section-label">3. Agenda de citas</p>
+            <div v-for="(sesion, index) in sesiones" :key="index" class="sesion-row"
+              style="margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px dashed #eee;">
+              <h4 v-if="sesiones.length > 1" style="margin-bottom: 0.8rem; color: #555;">📍 Sesión {{ index + 1 }}</h4>
+              <div class="form-grid">
+                <div class="input-group">
+                  <label>Fecha <span class="req">*</span></label>
+                  <input type="date" v-model="sesion.fecha" :min="fechaMin" @change="fetchSlotsForRow(index)" required />
+                  <p v-if="isDomingo(sesion.fecha)" class="field-hint warn">⚠️ El tópico no atiende los domingos.</p>
+                </div>
+                <div class="input-group">
+                  <label>Horario disponible <span class="req">*</span></label>
+                  <select v-model="sesion.hora" required
+                    :disabled="!sesion.fecha || !idfisioterapeuta || sesion.loading || isDomingo(sesion.fecha)">
+                    <option value="" disabled>
+                      {{
+                        sesion.loading ? 'Buscando turnos libres...' :
+                          isDomingo(sesion.fecha) ? '❌ Día no disponible' :
+                            !idfisioterapeuta ? '⚠️ Selecciona especialista' :
+                              !sesion.fecha ? '⚠️ Selecciona una fecha' :
+                                getSlotsFiltrados(index).length === 0 ? '❌ Sin turnos' : '— Seleccionar hora —'
+                      }}
+                    </option>
+                    <option v-for="slot in getSlotsFiltrados(index)" :key="slot" :value="slot">
+                      {{ slot }}
+                    </option>
+                  </select>
+                </div>
               </div>
-
-              <div class="input-group">
-                <label>Horario disponible <span class="req">*</span></label>
-                <select v-model="hora" required
-                  :disabled="!fecha || !idFisioterapeuta || loadingSlots || esDomingo">
-                  <option value="" disabled>
-                    {{
-                      loadingSlots ? 'Buscando turnos libres...' :
-                        esDomingo ? '❌ Día no disponible' :
-                          !idFisioterapeuta ? '⚠️ Selecciona un especialista primero' :
-                            !fecha ? '⚠️ Selecciona una fecha primero' :
-                              slotsFiltrados.length === 0 ? '❌ Sin turnos disponibles ese día' :
-                                '— Seleccionar hora —'
-                    }}
-                  </option>
-                  <option v-for="slot in slotsFiltrados" :key="slot" :value="slot">
-                    {{ slot }}
-                  </option>
-                </select>
-              </div>
-
             </div>
           </div>
 
-          <!-- ── Sección 4: Motivo (opcional) ───────────────────────────── -->
           <div class="form-section">
             <p class="section-label">4. Motivo de consulta (opcional)</p>
             <div class="input-group">
-              <textarea v-model="motivoConsulta" rows="2" placeholder="Describe brevemente el motivo de la visita..."
+              <textarea v-model="motivoConsulta" rows="2" placeholder="Aplica para todas las sesiones..."
                 maxlength="300"></textarea>
               <span class="char-count">{{ motivoConsulta.length }}/300</span>
             </div>
           </div>
 
-          <!-- ── Acciones ───────────────────────────────────────────────── -->
           <div class="modal-actions">
-            <button type="button" class="btn-secondary" @click="emit('close')" :disabled="loadingAccion">
-              Cancelar
-            </button>
+            <button type="button" class="btn-secondary" @click="emit('close')" :disabled="loadingAccion">Cancelar</button>
             <button type="submit" class="btn-primary-submit" :disabled="loadingAccion || !formularioValido">
               <span v-if="loadingAccion" class="btn-spinner"></span>
-              <span v-else>Registrar Cita</span>
+              <span v-else>{{ sesiones.length > 1 ? `Registrar ${sesiones.length} Citas` : 'Registrar Cita' }}</span>
             </button>
           </div>
-
         </form>
       </div>
     </div>

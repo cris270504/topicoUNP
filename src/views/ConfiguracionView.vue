@@ -113,25 +113,34 @@ const handleCreateUser = async () => {
 
   loading.value = true
   try {
-    const { data, error } = await supabaseCrearTerceros.auth.signUp({
-      email: email.value,
-      password: password.value,
-      options: {
-        data: {
-          rol: rolSeleccionado.value,
-          nombres: nombres.value,
-          apellidos: apellidos.value,
-          tipo_documento: tipoDocumento.value,
-          numero_documento: numeroDocumento.value,
-          celular: celular.value || null
-        }
+    const { data, error } = await supabase.functions.invoke('crear-paciente-admin', {
+      body: {
+        email: email.value,
+        password: password.value,
+        rol: rolSeleccionado.value,
+        nombres: nombres.value,
+        apellidos: apellidos.value,
+        tipo_documento: tipoDocumento.value,
+        numero_documento: numeroDocumento.value,
+        celular: celular.value || null,
+        fecha_nacimiento: null // ConfiguracionView no pide fecha, así que se envía null explícito
       }
     })
 
     if (error) throw error
-    if (!data.user) throw new Error('No se pudo generar la instancia de autenticación.')
+    if (data && data.error) {
+      throw new Error(data.error)
+    }
 
-    const newUid = data.user.id
+    const newUid = data.user_id
+
+    // Actualización de seguridad: Aseguramos que el celular se guarde explícitamente,
+    // ya que la Edge Function remota o el trigger podrían estar omitiéndolo.
+    if (celular.value) {
+      await supabase.from('persona').update({
+        celular: celular.value
+      }).eq('idpersona', newUid)
+    }
 
     if (rolSeleccionado.value === 'fisioterapeuta') {
       const { error: errSalud } = await supabase

@@ -9,7 +9,7 @@ const loading = ref(false)
 const userId = ref(null)
 const horarios = ref([]) // Estado local de todos los turnos en pantalla
 
-// Diccionario de días para iterar la interfaz
+// Diccionario de días para iterar la interfaz (BD solo admite 1=Lunes … 6=Sábado)
 const DIAS_SEMANA = [
   { id: 1, label: 'Lunes' },
   { id: 2, label: 'Martes' },
@@ -17,7 +17,6 @@ const DIAS_SEMANA = [
   { id: 4, label: 'Jueves' },
   { id: 5, label: 'Viernes' },
   { id: 6, label: 'Sábado' },
-  { id: 7, label: 'Domingo' }
 ]
 
 // Cargar los horarios actuales del fisioterapeuta en sesión
@@ -61,8 +60,46 @@ const removerTurno = (turno) => {
   horarios.value = horarios.value.filter(h => h !== turno)
 }
 
+// Verifica que exista el registro en fisioterapeuta; si falta, lo crea automáticamente
+const asegurarPerfilFisioterapeuta = async (user) => {
+  const { data, error } = await supabase
+    .from('fisioterapeuta')
+    .select('idfisioterapeuta')
+    .eq('idfisioterapeuta', user.id)
+    .maybeSingle()
+
+  if (error) throw new Error('Error al verificar tu perfil: ' + error.message)
+
+  if (!data) {
+    // El usuario existe en auth pero no en fisioterapeuta — lo creamos automáticamente
+    const meta = user.user_metadata || {}
+    const { error: errInsert } = await supabase
+      .from('fisioterapeuta')
+      .insert({
+        idfisioterapeuta: user.id,
+        especialidad: meta.especialidad || 'General',
+        tipo_personal: meta.tipo_personal || 'medico',
+        activo: true
+      })
+    if (errInsert) throw new Error(
+      'Tu perfil de especialista no está registrado en el sistema. ' +
+      'Contacta al administrador para que lo complete. (' + errInsert.message + ')'
+    )
+  }
+}
+
 // Lógica de Guardado (Batch Save)
 const guardarHorarios = async () => {
+  // Aseguramos tener el userId antes de operar (por si fetchHorarios falló antes de asignarlo)
+  if (!userId.value) {
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      showAlert('No hay sesión activa. Por favor recarga la página.', 'error')
+      return
+    }
+    userId.value = user.id
+  }
+
   // 1. Validaciones lógicas
   for (let turno of horarios.value) {
     if (!turno.hora_inicio || !turno.hora_fin) {
@@ -80,7 +117,11 @@ const guardarHorarios = async () => {
 
   loading.value = true
   try {
-    // 2. Eliminamos los registros anteriores del fisioterapeuta
+    // 2. Verificar / crear el registro en fisioterapeuta antes de insertar horarios
+    const { data: { user } } = await supabase.auth.getUser()
+    await asegurarPerfilFisioterapeuta(user)
+
+    // 3. Eliminamos los registros anteriores del fisioterapeuta
     const { error: errDel } = await supabase
       .from('horario')
       .delete()
@@ -88,7 +129,7 @@ const guardarHorarios = async () => {
 
     if (errDel) throw errDel
 
-    // 3. Insertamos el nuevo bloque de horarios completo
+    // 4. Insertamos el nuevo bloque de horarios completo
     if (horarios.value.length > 0) {
       const inserts = horarios.value.map(h => ({
         idfisioterapeuta: userId.value,

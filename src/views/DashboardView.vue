@@ -1,5 +1,5 @@
 <script setup>
-import { ref,onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useDashboard } from '@/composables/useDashboard'
 import { ESTADOS_CITA } from '@/composables/useCitas'
 import { supabase } from '@/lib/supabaseClient'
@@ -18,7 +18,7 @@ const obtenerRolActual = async () => {
 const {
   citasHoy, citasProximas, pacientesEnSala, ocupacionPersonal,
   resumenEstados, totalCitasHoy, loading, fetchDashboard,
-  esAdmin, esEnfermera, esFisioterapeuta, esPaciente
+  esPaciente, esPersonalSalud, esAdmin, esEnfermera
 } = useDashboard()
 
 onMounted(() => {
@@ -82,8 +82,7 @@ const formatFechaCompleta = (iso) => {
                   <td>{{ c.servicio_topico?.nombre_servicio }}</td>
                   <td>
                     <span class="staff-name">
-                      {{ c.fisioterapeuta ? `${c.fisioterapeuta.persona.nombres} ${c.fisioterapeuta.persona.apellidos}`
-                        : 'Por asignar' }}
+                      {{ c.fisioterapeuta?.persona ? `${c.fisioterapeuta.persona.nombres} ${c.fisioterapeuta.persona.apellidos}` : 'Por asignar' }}
                     </span>
                   </td>
                   <td>
@@ -99,7 +98,7 @@ const formatFechaCompleta = (iso) => {
         </div>
       </div>
 
-      <div v-if="esAdmin || esEnfermera || esFisioterapeuta">
+      <div v-if="esAdmin || esEnfermera || esPersonalSalud">
 
         <div class="stats-grid">
           <div class="data-card stat-card">
@@ -147,7 +146,8 @@ const formatFechaCompleta = (iso) => {
                     <span class="patient-detail">Cod: {{ p.paciente?.codigo_universitario }}</span>
                   </td>
                   <td>{{ p.servicio_topico?.nombre_servicio }}</td>
-                  <td>{{ p.fisioterapeuta ? p.fisioterapeuta.persona.apellidos : 'General' }}</td>
+                  <td>{{ p.fisioterapeuta?.persona?.apellidos ?? 'General' }}</td>
+
                   <td>
                     <span class="estado-badge"
                       :style="`color:${ESTADOS_CITA[p.estado]?.color}; background:${ESTADOS_CITA[p.estado]?.bg}`">
@@ -160,7 +160,7 @@ const formatFechaCompleta = (iso) => {
           </div>
         </div>
 
-        <div class="data-card" v-if="esAdmin || esEnfermera">
+        <div class="data-card" v-if="esAdmin || esEnfermera || esPersonalSalud">
           <h3>Ocupación del Personal de Salud — Hoy</h3>
           <div v-if="ocupacionPersonal.length === 0" class="empty-row">
             Ningún especialista tiene citas asignadas hoy.
@@ -181,7 +181,7 @@ const formatFechaCompleta = (iso) => {
         </div>
 
         <div class="data-card">
-          <h3>{{ esFisioterapeuta ? 'Mi Agenda de Hoy' : 'Agenda General de Hoy' }}</h3>
+          <h3>{{ esPersonalSalud && !esEnfermera ? 'Mi Agenda de Hoy' : 'Agenda General de Hoy' }}</h3>
           <div class="table-responsive">
             <table class="content-table">
               <thead>

@@ -5,7 +5,9 @@ import { useCitas } from '@/composables/useCitas'
 
 export function useDashboard() {
   const { showAlert } = useAlert()
-  const { userId, userRole, esPaciente, esFisioterapeuta, esEnfermera, esAdmin, initUser } = useCitas()
+
+  const { userId, userRole, esPaciente, esPersonalSalud, esAdmin, esEnfermera, initUser } = useCitas()
+
 
   const loading = ref(false)
   const citasHoy = ref([])
@@ -57,8 +59,8 @@ export function useDashboard() {
         .gte('fecha_hora', inicioDia)
         .lte('fecha_hora', finDia)
 
-      // Si es médico/enfermera, solo ve SUS citas del día
-      if (esFisioterapeuta.value) {
+      // Si es fisioterapeuta, solo ve SUS citas del día
+      if (esPersonalSalud.value) {
         query = query.eq('idfisioterapeuta', userId.value)
       }
 
@@ -90,7 +92,8 @@ export function useDashboard() {
           if (!ocupacionMap[idPersonal]) {
             ocupacionMap[idPersonal] = {
               idfisioterapeuta: idPersonal,
-              nombre: `${cita.fisioterapeuta.persona.nombres} ${cita.fisioterapeuta.persona.apellidos}`,
+              nombre: `${cita.fisioterapeuta.persona?.nombres ?? '—'} ${cita.fisioterapeuta.persona?.apellidos ?? ''}`.trim(),
+
               especialidad: cita.fisioterapeuta.especialidad,
               totalCitas: 0,
               atendidas: 0,
@@ -115,6 +118,8 @@ export function useDashboard() {
   return {
     loading, citasHoy, citasProximas, pacientesEnSala, ocupacionPersonal,
     resumenEstados, totalCitasHoy, fetchDashboard,
-    esAdmin, esEnfermera, esFisioterapeuta, esPaciente
+    // Roles (misma instancia que se usa en fetchDashboard)
+    esPaciente, esPersonalSalud, esAdmin, esEnfermera
+
   }
 }

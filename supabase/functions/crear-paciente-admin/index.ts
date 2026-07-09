@@ -16,7 +16,7 @@ serve(async (req) => {
   try {
     // Extraemos el payload que envías desde Vue
     const body = await req.json()
-    const { email, password, nombres, apellidos, rol, tipo_documento, numero_documento, celular, fecha_nacimiento } = body
+    const { email, password, user_metadata } = body
 
     // Inicializamos el cliente de Supabase con el SERVICE_ROLE_KEY para tener permisos de Admin
     const supabaseAdmin = createClient(
@@ -29,15 +29,7 @@ serve(async (req) => {
       email: email,
       password: password,
       email_confirm: true,
-      user_metadata: {
-        nombres,
-        apellidos,
-        rol,
-        tipo_documento,
-        numero_documento,
-        celular,
-        fecha_nacimiento
-      }
+      user_metadata: user_metadata || {}
     })
 
     if (error) throw error
@@ -53,10 +45,11 @@ serve(async (req) => {
 
   } catch (error) {
     // 4. Si hay error, TAMBIÉN debemos devolver los encabezados CORS, o Vue no podrá leer el mensaje
+    // Devolvemos 200 para que el cliente (supabase.functions.invoke) no arroje un error genérico y podamos leer el JSON con el mensaje real.
     return new Response(
       JSON.stringify({ error: error.message }),
       { 
-        status: 400, 
+        status: 200, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       }
     )
