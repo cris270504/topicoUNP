@@ -4,7 +4,7 @@ import { useEvaluacionInicial, ZONAS_CORPORALES } from '@/composables/useEvaluac
 
 const props = defineProps({
     idSesion: { type: [Number, String], required: true },
-    idpaciente: { type: String, required: true },
+    idPaciente: { type: String, required: true },
     idFisioterapeuta: { type: String, required: true },
     modoLectura: { type: Boolean, default: false }
 })

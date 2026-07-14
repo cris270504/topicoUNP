@@ -73,7 +73,7 @@ const router = createRouter({
           meta: { roles: ['fisioterapeuta', 'admin'] }
         },
         {
-          path: 'atencion/:idCita', // 👈 Parámetro actualizado de idSesion a idCita
+          path: 'atencion/:idCita',
           name: 'atencion',
           component: () => import('@/views/AtencionView.vue'),
           meta: { roles: ['fisioterapeuta', 'admin'] }

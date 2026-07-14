@@ -219,7 +219,7 @@ const formatFechaCompleta = (iso) => {
           </div>
         </div>
 
-        <div class="data-card" v-if="esAdmin || esEnfermera || esPersonalSalud">
+        <div class="data-card" v-if="esAdmin || esEnfermera">
           <h3>Ocupación del Personal de Salud — Hoy</h3>
           <div v-if="ocupacionPersonal.length === 0" class="empty-row">
             Ningún especialista tiene citas asignadas hoy.
