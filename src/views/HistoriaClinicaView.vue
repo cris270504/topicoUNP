@@ -170,7 +170,7 @@ onMounted(() => { cargarHistorial() })
                                 </div>
                                 
                                 <div class="fisio-name">
-                                    👨‍⚕️ Atendido por: {{ sesion.fisioterapeuta?.persona?.nombres }} {{ sesion.fisioterapeuta?.persona?.apellidos }}
+                                    Atendido por: {{ sesion.fisioterapeuta?.persona?.nombres }} {{ sesion.fisioterapeuta?.persona?.apellidos }}
                                 </div>
 
                                 <div class="sesion-notas">

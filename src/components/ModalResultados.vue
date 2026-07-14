@@ -4,7 +4,8 @@ import { ref, watch } from 'vue'
 const props = defineProps({
   isOpen: { type: Boolean, required: true },
   loadingAccion: { type: Boolean, default: false },
-  sesion: { type: Object, default: () => null }
+  sesion: { type: Object, default: () => null },
+  datosPrecargados: { type: Object, default: () => null }
 })
 
 const emit = defineEmits(['close', 'submit'])
@@ -18,20 +19,20 @@ const form = ref({
 
 watch(() => props.isOpen, (newVal) => {
   if (newVal) {
-    if (props.sesion) {
-      form.value = {
-        diagnostico: props.sesion.diagnostico_descripcion || '',
-        indicaciones: props.sesion.tratamiento_recetado || '',
-        cantidadSesiones: props.sesion.cantidad_sesiones_recomendadas || 0,
-        frecuencia: props.sesion.frecuencia_sesiones_recomendadas || ''
-      }
-    } else {
-      form.value = {
-        diagnostico: '',
-        indicaciones: '',
-        cantidadSesiones: 0,
-        frecuencia: ''
-      }
+    // 1. Obtenemos lo que haya en la base de datos (sesion)
+    const diagBD = props.sesion?.diagnostico_descripcion || ''
+    const indBD = props.sesion?.tratamiento_recetado || ''
+
+    // 2. Obtenemos lo que nos mandó la ficha (datosPrecargados)
+    const diagFicha = props.datosPrecargados?.diagnostico || ''
+    const indFicha = props.datosPrecargados?.indicaciones || ''
+
+    // 3. Asignamos con prioridad: primero BD, luego Ficha, luego vacío
+    form.value = {
+      diagnostico: diagBD || diagFicha,
+      indicaciones: indBD || indFicha,
+      cantidadSesiones: props.sesion?.cantidad_sesiones_recomendadas || 0,
+      frecuencia: props.sesion?.frecuencia_sesiones_recomendadas || ''
     }
   }
 })
@@ -95,7 +96,7 @@ const handleSubmit = () => {
             <button type="button" class="btn-secondary" @click="emit('close')" :disabled="loadingAccion">Cancelar</button>
             <button type="submit" class="btn-primary-submit" :disabled="loadingAccion">
               <span v-if="loadingAccion" class="btn-spinner"></span>
-              <span v-else>💾 Guardar y Finalizar Cita</span>
+              <span v-else>Guardar y Finalizar Cita</span>
             </button>
           </div>
         </form>

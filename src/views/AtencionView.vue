@@ -90,7 +90,7 @@ const cargarSesionClinica = async () => {
     if (errCita) throw errCita
 
     const nombreServ = dataCita.servicio_topico?.nombre_servicio?.toLowerCase() || ''
-    
+
     sesion.value = {
       ...dataCita,
       idSesion: dataCita.idcita,
@@ -99,7 +99,7 @@ const cargarSesionClinica = async () => {
       tipo: nombreServ.includes('masaje') ? 'masaje' : (nombreServ.includes('evaluación') ? 'evaluacion' : 'tratamiento'),
       es_evaluacion_inicial: nombreServ.includes('evaluación')
     }
-    
+
     paciente.value = {
       ...dataCita.paciente?.persona,
       idPaciente: dataCita.idpaciente
@@ -148,7 +148,7 @@ const guardarAntecedentes = async () => {
   savingAntecedentes.value = true
   try {
     const payload = {
-      idpaciente: sesion.value.idpaciente,
+      idpaciente: sesion.value.idPaciente,
       alergias: antecedentes.value.alergias.trim() || null,
       antecedentes_familiares: antecedentes.value.antecedentes_familiares.trim() || null,
       operaciones_quirurgicas: antecedentes.value.operaciones_quirurgicas.trim() || null,
@@ -170,10 +170,16 @@ const guardarAntecedentes = async () => {
     savingAntecedentes.value = false
   }
 }
+const datosPreCargadosModal = ref(null)
 
-// Escucha el evento de completado desde cualquiera de los dos componentes hijos
-const finalizarAtencion = () => {
-  // Abrimos el modal de resultados para capturar diagnóstico e indicaciones
+// 2. Reemplaza tu función actual por esta:
+const finalizarAtencion = (datosFicha) => {
+  console.log("2. Padre recibe:", datosFicha) // Para confirmar que llega
+  
+  if (datosFicha) {
+    datosPreCargadosModal.value = datosFicha
+  }
+  
   showModalResultados.value = true
 }
 
@@ -187,7 +193,7 @@ const guardarResultadosYFinalizar = async (payload) => {
       cantidad_sesiones_recomendadas: payload.cantidadSesiones,
       frecuencia_sesiones_recomendadas: payload.frecuencia
     }).eq('idcita', idCita)
-    
+
     if (error) throw error
     showAlert('📝 Registro clínico guardado y sesión finalizada.', 'success')
     router.push('/citas')
@@ -260,20 +266,20 @@ onMounted(() => { cargarSesionClinica() })
         <button type="button" class="btn-secondary"
           style="width: 100%; margin-top: 20px; display: flex; justify-content: center; gap: 8px;"
           @click="showModalAntecedentes = true">
-          📋 Ver / Editar Antecedentes
+          Ver / Editar Antecedentes
         </button>
 
         <button type="button" class="btn-secondary"
           style="width: 100%; margin-top: 10px; display: flex; justify-content: center; gap: 8px; background: #ccfbf1; color: #0f766e; border-color: #99f6e4;"
-          @click="router.push({ name: 'HistoriaClinica', params: { idpaciente: sesion.idpaciente } })">
-          📚 Ver Historial Completo
+          @click="router.push({ name: 'HistoriaClinica', params: { idPaciente: sesion.idPaciente } })">
+          Ver Historial Completo
         </button>
       </div>
 
       <div class="data-card" style="padding: 24px;">
 
-        <FichaEvaluacionInicial v-if="isEvaluacion" :idSesion="sesion.idSesion" :idTratamiento="sesion.idTratamiento"
-          :idpaciente="sesion.idpaciente" :idFisioterapeuta="sesion.idFisioterapeuta" @completado="finalizarAtencion" />
+        <FichaEvaluacionInicial v-if="isEvaluacion && sesion" :idSesion="sesion.idSesion"
+          :idPaciente="sesion.idPaciente" :idFisioterapeuta="sesion.idFisioterapeuta" @completado="finalizarAtencion" />
 
         <div v-else-if="isMasaje" class="masaje-atencion-box">
           <div
@@ -331,8 +337,8 @@ onMounted(() => { cargarSesionClinica() })
             <button class="close-x" @click="verFichaHistorica = false">&times;</button>
           </div>
           <div class="modal-form" style="overflow-y: auto; padding: 20px;">
-            <FichaEvaluacionInicial :idTratamiento="sesion.idTratamiento" :idpaciente="sesion.idpaciente"
-              :modoLectura="true" />
+            <FichaEvaluacionInicial v-if="sesion" :idSesion="sesion.idSesion" :idPaciente="sesion.idPaciente"
+              :idFisioterapeuta="sesion.idFisioterapeuta" :modoLectura="true" />
           </div>
           <div class="modal-actions" style="padding: 15px; border-top: 1px solid #eee;">
             <button class="btn-secondary" @click="verFichaHistorica = false">Cerrar Ficha</button>
@@ -359,8 +365,8 @@ onMounted(() => { cargarSesionClinica() })
               </div>
               <div class="input-group"><label>Antecedentes Quirúrgicos</label><textarea
                   v-model="antecedentes.operaciones_quirurgicas" rows="2"></textarea></div>
-              <div class="input-group"><label>Antecedentes Familiares</label><textarea v-model="antecedentes.antecedentes_familiares"
-                  rows="2"></textarea></div>
+              <div class="input-group"><label>Antecedentes Familiares</label><textarea
+                  v-model="antecedentes.antecedentes_familiares" rows="2"></textarea></div>
               <div class="input-group"><label>Observaciones / Enfermedades Crónicas</label><textarea
                   v-model="antecedentes.observaciones_generales" rows="2"></textarea></div>
 
@@ -370,7 +376,7 @@ onMounted(() => { cargarSesionClinica() })
                   :disabled="savingAntecedentes">Cerrar</button>
                 <button type="submit" class="btn-primary-submit" :disabled="savingAntecedentes">
                   <span v-if="savingAntecedentes" class="btn-spinner"></span>
-                  <span v-else>💾 Guardar Antecedentes</span>
+                  <span v-else>Guardar Antecedentes</span>
                 </button>
               </div>
             </form>
@@ -379,13 +385,9 @@ onMounted(() => { cargarSesionClinica() })
       </div>
     </Transition>
 
-    <ModalResultados 
-      :isOpen="showModalResultados" 
-      :sesion="sesion"
-      :loadingAccion="savingResultados" 
-      @close="showModalResultados = false" 
-      @submit="guardarResultadosYFinalizar" 
-    />
+    <ModalResultados :isOpen="showModalResultados" :loadingAccion="savingResultados" :sesion="sesion"
+      :datosPrecargados="datosPreCargadosModal" @close="showModalResultados = false"
+      @submit="guardarResultadosYFinalizar" />
 
   </div>
 </template>

@@ -138,8 +138,17 @@ onMounted(async () => {
 
 const emit = defineEmits(['completado'])
 const finalizarEvaluacionManual = () => {
-    // El autoguardado ya hizo el trabajo pesado, solo avisamos que cerramos.
-    emit('completado')
+    // 1. Extraemos los textos directamente del objeto reactivo
+    const diagnosticoFisio = dataSecciones.seccion_diagnostico_fisio?.diagnostico_fisioterapeutico || ''
+    const planTratamiento = dataSecciones.seccion_plan_tratamiento?.plan || ''
+
+    console.log("1. Ficha envía:", { diagnosticoFisio, planTratamiento }) // 👈 Revisa esto en consola
+    
+    // 2. Los enviamos al padre dentro del evento 'completado'
+    emit('completado', { 
+        diagnostico: diagnosticoFisio, 
+        indicaciones: planTratamiento 
+    })
 }
 
 const fichaExiste = computed(() => !!evaluacion.value)
@@ -864,7 +873,7 @@ const toggleZona = async (zonaId) => {
 
             <div class="form-actions" style="margin-top: 30px;" v-if="!modoLectura">
                 <button type="button" class="btn-iniciar-evaluacion" @click="finalizarEvaluacionManual">
-                    <span class="icono">💾</span> Guardar Ficha Integral y Finalizar Sesión
+                    <span class="icono"></span> Guardar Ficha Integral y Finalizar Sesión
                 </button>
             </div>
         </div>
