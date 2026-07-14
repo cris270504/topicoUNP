@@ -13,6 +13,9 @@ onMounted(() => {
 
     // 1. CUANDO EL USUARIO INICIA SESIÓN (O RECARGA LA PÁGINA ESTANDO DENTRO)
     if (session) {
+      if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel)
+      }
 
       // Creamos un canal para escuchar EXCLUSIVAMENTE a su fila en la tabla persona
       realtimeChannel = supabase
@@ -26,10 +29,9 @@ onMounted(() => {
             filter: `idpersona=eq.${session.user.id}`
           },
           async (payload) => {
-            // 🚨 ¡ALERTA EN VIVO! El admin acaba de actualizar su estado a false
             if (payload.new.activo === false) {
               await supabase.auth.signOut()
-              alert('🚨 Tu cuenta ha sido suspendida. Conexión terminada.')
+              alert('Tu cuenta ha sido suspendida. Conexión terminada.')
             }
           }
         )
@@ -38,12 +40,11 @@ onMounted(() => {
 
     // 2. CUANDO LA SESIÓN SE DESTRUYE (Por suspensión o porque cerró sesión manual)
     if (event === 'SIGNED_OUT') {
-      // Apagamos el micrófono de escucha para no consumir memoria
       if (realtimeChannel) {
         supabase.removeChannel(realtimeChannel)
+        realtimeChannel = null // 👈 Limpiamos la variable
       }
-      // Lo expulsamos visualmente a la pantalla de Login
-      router.push('/') // 👈 Cambia '/' por el path real de tu Login si es distinto
+      router.push('/')
     }
   })
 })
