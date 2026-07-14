@@ -246,7 +246,7 @@ onMounted(() => {
               <th>N° Documento</th>
               <th>Celular</th>
               <th>Especialidad Médica</th>
-              <th>Acciones</th> <!-- 👈 Nueva Columna -->
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
