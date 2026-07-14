@@ -199,7 +199,7 @@ const accionesDe = (sesion) => {
     puedeReprogramar: puedeGestionar.value && ['pendiente', 'confirmada'].includes(e) && !enSala,
     puedeCancelar: puedeGestionar.value && ['pendiente', 'confirmada'].includes(e) && !enSala,
     puedeVerRegistro: e === 'completada',
-    puedeVerDetalles: e === 'cancelada',
+    puedeVerDetalles: e === 'cancelada' && puedeGestionar.value,
   }
 }
 

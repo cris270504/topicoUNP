@@ -104,7 +104,10 @@ export function useCitas() {
         `)
 
       if (esPaciente.value)       query = query.eq('idpaciente', userId.value)
-      if (esFisioterapeuta.value) query = query.eq('idfisioterapeuta', userId.value)
+      if (esFisioterapeuta.value) {
+        query = query.eq('idfisioterapeuta', userId.value)
+        query = query.not('estado', 'eq', 'cancelada')
+      }
 
       if (filtros.fecha) {
         query = query

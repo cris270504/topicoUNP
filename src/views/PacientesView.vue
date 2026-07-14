@@ -8,6 +8,12 @@ import FormularioPacienteModal from '@/components/FormularioPacienteModal.vue'
 const { showAlert, showConfirm } = useAlert()
 const router = useRouter()
 
+const esFisioterapeuta = ref(false)
+const cargarRol = async () => {
+  const { data: { user } } = await supabase.auth.getUser()
+  esFisioterapeuta.value = user?.user_metadata?.rol === 'fisioterapeuta'
+}
+
 const irAHistoriaClinica = (id) => {
     router.push({ name: 'HistoriaClinica', params: { idPaciente: id } })
 }
@@ -89,6 +95,7 @@ const handleDeletePaciente = async (idPersonaReal) => {
 }
 
 onMounted(() => {
+    cargarRol()
     fetchPacientes()
 })
 </script>
@@ -143,11 +150,11 @@ onMounted(() => {
                                 style="padding: 6px 14px; font-size: 12px; border-radius: 6px; margin-right: 8px; background: #ccfbf1; color: #0f766e">
                                     <i class="icono-historia"></i> Historia Clínica
                                 </button>
-                                <button @click="openEditForm(paciente)" class="btn-secondary"
+                                <button v-if="!esFisioterapeuta" @click="openEditForm(paciente)" class="btn-secondary"
                                     style="padding: 6px 14px; font-size: 12px; border-radius: 6px; margin-right: 8px;">
                                     Editar
                                 </button>
-                                <button @click="handleDeletePaciente(paciente.persona?.idpersona)" class="btn-secondary"
+                                <button v-if="!esFisioterapeuta" @click="handleDeletePaciente(paciente.persona?.idpersona)" class="btn-secondary"
                                     style="padding: 6px 14px; font-size: 12px; border-radius: 6px; background: #fee2e2; color: #ef4444;">
                                     Eliminar
                                 </button>

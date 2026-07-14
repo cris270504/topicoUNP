@@ -18,18 +18,6 @@ const {
 const seccionesAbiertas = reactive({
     seccion_anamnesis: true,
     seccion_dolor: true,
-    seccion_inspeccion_postural: false,
-    seccion_palpacion: false,
-    seccion_rom_articular: false,
-    seccion_rom_columna: false,
-    seccion_eval_muscular: false,
-    seccion_flexibilidad: false,
-    seccion_neurologica: false,
-    seccion_pruebas_funcionales: false,
-    seccion_tests_ortopedicos: false,
-    seccion_marcha_equilibrio: false,
-    seccion_eval_funcional: false,
-    seccion_escalas_funcionales: false,
     seccion_diagnostico_fisio: true,
     seccion_objetivos: true,
     seccion_plan_tratamiento: true,
@@ -91,23 +79,11 @@ const dataSecciones = reactive({
 })
 
 const SECCIONES_DEF = [
-    { key: 'seccion_anamnesis', titulo: '2. Anamnesis / Historia clínica' },
-    { key: 'seccion_dolor', titulo: '3. Evaluación del dolor' },
-    { key: 'seccion_inspeccion_postural', titulo: '4. Inspección y observación postural' },
-    { key: 'seccion_palpacion', titulo: '5. Palpación' },
-    { key: 'seccion_rom_articular', titulo: '6. Rango de movimiento articular' },
-    { key: 'seccion_rom_columna', titulo: '7. Rango de movimiento de columna' },
-    { key: 'seccion_eval_muscular', titulo: '8. Evaluación muscular (escala Daniels)' },
-    { key: 'seccion_flexibilidad', titulo: '9. Evaluación de flexibilidad' },
-    { key: 'seccion_neurologica', titulo: '10. Evaluación neurológica básica' },
-    { key: 'seccion_pruebas_funcionales', titulo: '11. Pruebas funcionales generales' },
-    { key: 'seccion_tests_ortopedicos', titulo: '12. Test ortopédicos por zona' },
-    { key: 'seccion_marcha_equilibrio', titulo: '13. Marcha, equilibrio y coordinación' },
-    { key: 'seccion_eval_funcional', titulo: '14. Evaluación funcional del paciente' },
-    { key: 'seccion_escalas_funcionales', titulo: '15. Escalas funcionales sugeridas' },
-    { key: 'seccion_diagnostico_fisio', titulo: '16. Diagnóstico fisioterapéutico' },
-    { key: 'seccion_objetivos', titulo: '17. Objetivos del tratamiento' },
-    { key: 'seccion_plan_tratamiento', titulo: '18. Plan de tratamiento' },
+    { key: 'seccion_anamnesis', titulo: '1. Anamnesis / Historia clínica' },
+    { key: 'seccion_dolor', titulo: '2. Evaluación del dolor' },
+    { key: 'seccion_diagnostico_fisio', titulo: '3. Diagnóstico fisioterapéutico' },
+    { key: 'seccion_objetivos', titulo: '4. Objetivos del tratamiento' },
+    { key: 'seccion_plan_tratamiento', titulo: '5. Plan de tratamiento' },
 ]
 
 const esSeccionResaltada = (key) => {
@@ -213,8 +189,7 @@ const toggleZona = async (zonaId) => {
                 <div class="cta-icon">📋</div>
                 <h3 class="cta-evaluacion-title">Ficha de Evaluación Fisioterapéutica Integral</h3>
                 <p class="cta-evaluacion-desc">
-                    El paciente no cuenta con una evaluación inicial registrada para este episodio. Inicie el proceso de
-                    evaluación de 16 secciones.
+                    El paciente no cuenta con una evaluación inicial registrada para este episodio. Complete las 5 secciones esenciales.
                 </p>
             </div>
 
