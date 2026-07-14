@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { supabase } from '@/lib/supabaseClient'
 import { useAlert } from '@/composables/useAlert'
 
-const { showAlert, showConfirm } = useAlert() // 👈 Importamos showConfirm
+const { showAlert, showConfirm } = useAlert()
 
 const loading = ref(false)
 const showModal = ref(false)
@@ -31,7 +31,8 @@ const fetchPersonal = async () => {
         apellidos,
         celular,
         tipo_documento,
-        numero_documento, activo,
+        numero_documento, 
+        activo,
         fisioterapeuta(especialidad, tipo_personal), 
         enfermera(idenfermera),
         paciente(idpaciente, tipo_usuario) 
@@ -84,7 +85,7 @@ const fetchPersonal = async () => {
 const personalFiltrado = computed(() => {
   if (filtroEstado.value === 'activos') return personalList.value.filter(p => p.activo)
   if (filtroEstado.value === 'suspendidos') return personalList.value.filter(p => !p.activo)
-  return personalList.value // 'todos'
+  return personalList.value
 })
 
 const handleCreateUser = async () => {
@@ -164,10 +165,8 @@ const handleCreateUser = async () => {
   }
 }
 
-// ── NUEVO: GESTIÓN DE SUSPENSIÓN Y ELIMINACIÓN ──
 const handleGestionarAcceso = async (id, nombre, accion) => {
   const accionTexto = accion === 'suspender' ? 'suspender el acceso de' : 'restaurar el acceso de';
-
   const confirmado = await showConfirm(`¿Estás seguro de que deseas ${accionTexto} a ${nombre}?`);
   if (!confirmado) return;
 
@@ -181,7 +180,7 @@ const handleGestionarAcceso = async (id, nombre, accion) => {
     if (data && data.error) throw new Error(data.error);
 
     showAlert(data.message || `Usuario procesado correctamente.`, 'success');
-    await fetchPersonal(); // Refrescar la tabla
+    await fetchPersonal();
   } catch (error) {
     showAlert('Error al procesar la solicitud: ' + error.message, 'error');
   } finally {
@@ -209,6 +208,7 @@ onMounted(() => {
 <template>
   <div class="config-view" :style="loading ? 'opacity: 0.7; pointer-events: none;' : ''">
 
+    <!-- ── CABECERA Y BOTÓN DE ABRIR MODAL ── -->
     <div class="action-header">
       <div class="header-text">
         <h2>Gestión de Accesos</h2>
@@ -224,13 +224,11 @@ onMounted(() => {
       </button>
     </div>
 
+    <!-- ── TABLA DE DATOS ── -->
     <div class="data-card">
-
-      <div
-        style="padding: 16px 20px; border-bottom: 1px solid #e2e8f0; display: flex; gap: 12px; align-items: center; background: #f8fafc; border-radius: 12px 12px 0 0;">
+      <div style="padding: 16px 20px; border-bottom: 1px solid #e2e8f0; display: flex; gap: 12px; align-items: center; background: #f8fafc; border-radius: 12px 12px 0 0;">
         <label style="font-size: 0.9rem; font-weight: 600; color: #475569;">Ver usuarios:</label>
-        <select v-model="filtroEstado"
-          style="padding: 6px 12px; border-radius: 8px; border: 1px solid #cbd5e1; background: white; outline: none; cursor: pointer;">
+        <select v-model="filtroEstado" style="padding: 6px 12px; border-radius: 8px; border: 1px solid #cbd5e1; background: white; outline: none; cursor: pointer;">
           <option value="activos">Activos</option>
           <option value="suspendidos">Suspendidos</option>
           <option value="todos">Todos</option>
@@ -253,8 +251,7 @@ onMounted(() => {
             <tr v-for="staff in personalFiltrado" :key="staff.id" :class="{ 'row-suspended': !staff.activo }">
               <td class="staff-name">
                 {{ staff.nombres }} {{ staff.apellidos }}
-                <span v-if="!staff.activo"
-                  style="display: block; font-size: 0.75rem; color: #dc2626; font-weight: 600; margin-top: 4px;">(Suspendido)</span>
+                <span v-if="!staff.activo" style="display: block; font-size: 0.75rem; color: #dc2626; font-weight: 600; margin-top: 4px;">(Suspendido)</span>
               </td>
               <td><span class="badge" :class="staff.rolClaseCss">{{ staff.rol }}</span></td>
               <td>{{ staff.documento }}</td>
@@ -262,21 +259,18 @@ onMounted(() => {
               <td class="staff-detail">{{ staff.especialidad }}</td>
 
               <td class="acciones-cell">
-                <!-- 👈 Botón Dinámico: Suspender o Activar -->
-                <button v-if="staff.activo" class="accion-btn btn-suspend"
-                  @click="handleGestionarAcceso(staff.id, staff.nombres, 'suspender')" title="Bloquear acceso">
+                <button v-if="staff.activo" class="accion-btn btn-suspend" @click="handleGestionarAcceso(staff.id, staff.nombres, 'suspender')" title="Bloquear acceso">
                   Suspender
                 </button>
-                <button v-else class="accion-btn btn-restore"
-                  @click="handleGestionarAcceso(staff.id, staff.nombres, 'restaurar')" title="Restaurar acceso">
+                <button v-else class="accion-btn btn-restore" @click="handleGestionarAcceso(staff.id, staff.nombres, 'restaurar')" title="Restaurar acceso">
                   Activar
                 </button>
               </td>
             </tr>
 
-            <tr v-if="personalList.length === 0">
+            <tr v-if="personalFiltrado.length === 0">
               <td colspan="6" class="empty-row">
-                No se registran usuarios en la base de datos.
+                No se registran usuarios para este filtro.
               </td>
             </tr>
           </tbody>
@@ -284,24 +278,105 @@ onMounted(() => {
       </div>
     </div>
 
+    <!-- ── MODAL FLOTANTE DE REGISTRO ── -->
+    <Transition name="fade-modal">
+      <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
+        <div class="modal-window">
+
+          <div class="modal-header">
+            <h3>Alta de Nuevo Trabajador</h3>
+            <button class="close-x" @click="showModal = false">&times;</button>
+          </div>
+
+          <form @submit.prevent="handleCreateUser" class="modal-form">
+            <div class="form-grid">
+
+              <div class="input-group">
+                <label for="modal-nombres">Nombres *</label>
+                <input id="modal-nombres" type="text" v-model="nombres" placeholder="Ej: Carlos Alberto" required />
+              </div>
+
+              <div class="input-group">
+                <label for="modal-apellidos">Apellidos *</label>
+                <input id="modal-apellidos" type="text" v-model="apellidos" placeholder="Ej: Mendoza Flores" required />
+              </div>
+
+              <div class="input-group">
+                <label for="modal-tipo-doc">Tipo de Documento</label>
+                <select id="modal-tipo-doc" v-model="tipoDocumento">
+                  <option value="DNI">DNI</option>
+                  <option value="CE">Carné de Extranjería</option>
+                  <option value="PAS">Pasaporte</option>
+                </select>
+              </div>
+
+              <div class="input-group">
+                <label for="modal-num-doc">Número de Documento *</label>
+                <input v-model="numeroDocumento" type="text" :maxlength="tipoDocumento === 'DNI' ? 8 : 15" @input="numeroDocumento = numeroDocumento.replace(/\D/g, '')" placeholder="Ingrese el número de documento" class="form-input" />
+              </div>
+
+              <div class="input-group">
+                <label for="modal-celular">Celular</label>
+                <input id="modal-celular" type="text" v-model="celular" placeholder="9 dígitos" maxlength="9" />
+              </div>
+
+              <div class="input-group">
+                <label for="modal-rol">Rol del Sistema</label>
+                <select id="modal-rol" v-model="rolSeleccionado">
+                  <option value="fisioterapeuta">Personal de Salud</option>
+                  <option value="enfermera">Enfermera</option>
+                </select>
+              </div>
+
+              <div class="input-group span-2">
+                <label for="modal-email">Correo Electrónico Institucional *</label>
+                <input id="modal-email" type="email" v-model="email" placeholder="usuario@unp.edu.pe" required />
+              </div>
+
+              <div class="input-group span-2">
+                <label for="modal-password">Contraseña Temporal de Acceso *</label>
+                <input id="modal-password" type="password" v-model="password" placeholder="Mínimo 6 caracteres" required />
+              </div>
+
+              <Transition name="slide-input">
+                <div v-if="rolSeleccionado === 'fisioterapeuta'"   style="margin-top: 0">
+                  <div class="input-group">
+                    <label for="modal-especialidad">Especialidad Terapéutica *</label>
+                    <input id="modal-especialidad" type="text" v-model="especialidad" placeholder="Ej: Medicina Familiar / Psicoterapia" required />
+                  </div>
+                </div>
+              </Transition>
+
+            </div>
+
+            <div class="modal-actions">
+              <button type="button" class="btn-secondary" @click="showModal = false">Cancelar</button>
+              <button type="submit" class="btn-primary-submit" :disabled="loading">
+                <span v-if="loading" class="btn-spinner"></span>
+                <span v-else>Confirmar Registro</span>
+              </button>
+            </div>
+          </form>
+
+        </div>
+      </div>
+    </Transition>
+
   </div>
 </template>
 
 <style scoped>
-/* ── Estilos para los nuevos botones de acción ── */
 .acciones-cell {
   display: flex;
   gap: 8px;
   align-items: center;
 }
 
-/* Botón Verde para Restaurar */
 .btn-restore {
   background: #dcfce7;
   color: #166534;
 }
 
-/* Atenuar visualmente a los usuarios suspendidos */
 .row-suspended td {
   opacity: 0.6;
   background-color: #f8fafc;
@@ -321,13 +396,11 @@ onMounted(() => {
   opacity: 0.8;
 }
 
-/* Naranja para Suspender (Alerta) */
 .btn-suspend {
   background: #ffedd5;
   color: #c2410c;
 }
 
-/* Rojo para Eliminar (Peligro) */
 .btn-delete {
   background: #fee2e2;
   color: #b91c1c;

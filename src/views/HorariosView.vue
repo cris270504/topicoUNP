@@ -58,7 +58,7 @@ const fetchHorarios = async () => {
 const getTurnosPorDia = (idDia) => horarios.value.filter(h => h.dia_semana === idDia)
 
 const agregarTurno = (idDia) => {
-  horarios.value.push({ dia_semana: idDia, hora_inicio: '08:00', hora_fin: '13:00' })
+  horarios.value.push({ dia_semana: idDia, hora_inicio: '08:00', hora_fin: '17:00' })
 }
 
 const removerTurno = (turno) => {

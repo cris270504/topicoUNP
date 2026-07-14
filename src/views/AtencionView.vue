@@ -29,10 +29,9 @@ const savingResultados = ref(false)
 
 const antecedentes = ref({
   alergias: '',
-  familiares: '',
-  traumatologicos: '',
-  quirurgicos: '',
-  observaciones: ''
+  antecedentes_familiares: '',
+  operaciones_quirurgicas: '',
+  observaciones_generales: ''
 })
 
 // Determina dinámicamente qué componente renderizar
@@ -118,10 +117,9 @@ const cargarSesionClinica = async () => {
     if (dataAntec) {
       antecedentes.value = {
         alergias: dataAntec.alergias || '',
-        familiares: dataAntec.familiares || '',
-        traumatologicos: dataAntec.traumatologicos || '',
-        quirurgicos: dataAntec.quirurgicos || '',
-        observaciones: dataAntec.observaciones || ''
+        antecedentes_familiares: dataAntec.antecedentes_familiares || '',
+        operaciones_quirurgicas: dataAntec.operaciones_quirurgicas || '',
+        observaciones_generales: dataAntec.observaciones_generales || ''
       }
     }
 
@@ -150,13 +148,12 @@ const guardarAntecedentes = async () => {
   savingAntecedentes.value = true
   try {
     const payload = {
-      idPaciente: sesion.value.idPaciente,
+      idpaciente: sesion.value.idpaciente,
       alergias: antecedentes.value.alergias.trim() || null,
-      familiares: antecedentes.value.familiares.trim() || null,
-      traumatologicos: antecedentes.value.traumatologicos.trim() || null,
-      quirurgicos: antecedentes.value.quirurgicos.trim() || null,
-      observaciones: antecedentes.value.observaciones.trim() || null,
-      update_at: new Date().toISOString()
+      antecedentes_familiares: antecedentes.value.antecedentes_familiares.trim() || null,
+      operaciones_quirurgicas: antecedentes.value.operaciones_quirurgicas.trim() || null,
+      observaciones_generales: antecedentes.value.observaciones_generales.trim() || null,
+      updated_at: new Date().toISOString()
     }
 
     const { error } = await supabase
@@ -165,7 +162,7 @@ const guardarAntecedentes = async () => {
 
     if (error) throw error
 
-    showAlert('📋 Antecedentes clínicos actualizados.', 'success')
+    showAlert('Antecedentes clínicos actualizados.', 'success')
     showModalAntecedentes.value = false
   } catch (err) {
     showAlert('Error al guardar antecedentes: ' + err.message, 'error')
@@ -268,7 +265,7 @@ onMounted(() => { cargarSesionClinica() })
 
         <button type="button" class="btn-secondary"
           style="width: 100%; margin-top: 10px; display: flex; justify-content: center; gap: 8px; background: #ccfbf1; color: #0f766e; border-color: #99f6e4;"
-          @click="router.push({ name: 'HistoriaClinica', params: { idPaciente: sesion.idPaciente } })">
+          @click="router.push({ name: 'HistoriaClinica', params: { idpaciente: sesion.idpaciente } })">
           📚 Ver Historial Completo
         </button>
       </div>
@@ -276,7 +273,7 @@ onMounted(() => { cargarSesionClinica() })
       <div class="data-card" style="padding: 24px;">
 
         <FichaEvaluacionInicial v-if="isEvaluacion" :idSesion="sesion.idSesion" :idTratamiento="sesion.idTratamiento"
-          :idPaciente="sesion.idPaciente" :idFisioterapeuta="sesion.idFisioterapeuta" @completado="finalizarAtencion" />
+          :idpaciente="sesion.idpaciente" :idFisioterapeuta="sesion.idFisioterapeuta" @completado="finalizarAtencion" />
 
         <div v-else-if="isMasaje" class="masaje-atencion-box">
           <div
@@ -334,7 +331,7 @@ onMounted(() => { cargarSesionClinica() })
             <button class="close-x" @click="verFichaHistorica = false">&times;</button>
           </div>
           <div class="modal-form" style="overflow-y: auto; padding: 20px;">
-            <FichaEvaluacionInicial :idTratamiento="sesion.idTratamiento" :idPaciente="sesion.idPaciente"
+            <FichaEvaluacionInicial :idTratamiento="sesion.idTratamiento" :idpaciente="sesion.idpaciente"
               :modoLectura="true" />
           </div>
           <div class="modal-actions" style="padding: 15px; border-top: 1px solid #eee;">
@@ -361,13 +358,11 @@ onMounted(() => { cargarSesionClinica() })
                   placeholder="Ej: Alergia al látex, paracetamol..."></textarea>
               </div>
               <div class="input-group"><label>Antecedentes Quirúrgicos</label><textarea
-                  v-model="antecedentes.quirurgicos" rows="2"></textarea></div>
-              <div class="input-group"><label>Antecedentes Traumatológicos</label><textarea
-                  v-model="antecedentes.traumatologicos" rows="2"></textarea></div>
-              <div class="input-group"><label>Antecedentes Familiares</label><textarea v-model="antecedentes.familiares"
+                  v-model="antecedentes.operaciones_quirurgicas" rows="2"></textarea></div>
+              <div class="input-group"><label>Antecedentes Familiares</label><textarea v-model="antecedentes.antecedentes_familiares"
                   rows="2"></textarea></div>
               <div class="input-group"><label>Observaciones / Enfermedades Crónicas</label><textarea
-                  v-model="antecedentes.observaciones" rows="2"></textarea></div>
+                  v-model="antecedentes.observaciones_generales" rows="2"></textarea></div>
 
               <div class="modal-actions"
                 style="position: sticky; bottom: -20px; background: white; padding-top: 10px; border-top: 1px solid #eee;">

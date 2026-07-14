@@ -4,7 +4,7 @@ import { useEvaluacionInicial, ZONAS_CORPORALES } from '@/composables/useEvaluac
 
 const props = defineProps({
     idSesion: { type: [Number, String], required: true },
-    idPaciente: { type: String, required: true },
+    idpaciente: { type: String, required: true },
     idFisioterapeuta: { type: String, required: true },
     modoLectura: { type: Boolean, default: false }
 })
@@ -186,7 +186,6 @@ const toggleZona = async (zonaId) => {
         <div v-if="!fichaExiste && !loading" class="cta-evaluacion-container">
 
             <div class="cta-header">
-                <div class="cta-icon">📋</div>
                 <h3 class="cta-evaluacion-title">Ficha de Evaluación Fisioterapéutica Integral</h3>
                 <p class="cta-evaluacion-desc">
                     El paciente no cuenta con una evaluación inicial registrada para este episodio. Complete las 5 secciones esenciales.
@@ -222,7 +221,7 @@ const toggleZona = async (zonaId) => {
                 <div class="form-actions">
                     <button class="btn-iniciar-evaluacion" @click="handleCrearFicha"
                         :disabled="!motivoConsulta.trim() || !apuntesGenerales.trim()">
-                        <span class="icono">✨</span> Crear Ficha de Evaluación
+                        <span class="icono"></span> Crear Ficha de Evaluación
                     </button>
                 </div>
             </div>

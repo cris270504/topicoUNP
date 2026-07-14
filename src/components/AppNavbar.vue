@@ -56,6 +56,7 @@ onMounted(() => {
     </div>
 
     <div class="navbar-right">
+
       <div class="user-menu-wrapper">
         <button class="avatar-btn" @click="toggleUserMenu" title="Mi cuenta">
           <div class="avatar">
@@ -92,105 +93,7 @@ onMounted(() => {
           </div>
         </Transition>
       </div>
-      <Transition name="fade-modal">
-        <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
-          <div class="modal-window">
 
-            <div class="modal-header">
-              <h3>Alta de Nuevo Trabajador</h3>
-              <button class="close-x" @click="showModal = false">&times;</button>
-            </div>
-
-            <form @submit.prevent="handleCreateUser" class="modal-form">
-              <div class="form-grid">
-
-                <div class="input-group">
-                  <label for="modal-nombres">Nombres *</label>
-                  <input id="modal-nombres" type="text" v-model="nombres" placeholder="Ej: Carlos Alberto" required />
-                </div>
-
-                <div class="input-group">
-                  <label for="modal-apellidos">Apellidos *</label>
-                  <input id="modal-apellidos" type="text" v-model="apellidos" placeholder="Ej: Mendoza Flores"
-                    required />
-                </div>
-
-                <div class="input-group">
-                  <label for="modal-tipo-doc">Tipo de Documento</label>
-                  <select id="modal-tipo-doc" v-model="tipoDocumento">
-                    <option value="DNI">DNI</option>
-                    <option value="CE">Carné de Extranjería</option>
-                    <option value="PAS">Pasaporte</option>
-                  </select>
-                </div>
-
-                <div class="input-group">
-                  <label for="modal-num-doc">Número de Documento *</label>
-                  <input v-model="numeroDocumento" type="text" :maxlength="tipoDocumento === 'DNI' ? 8 : 15"
-                    @input="numeroDocumento = numeroDocumento.replace(/\D/g, '')"
-                    placeholder="Ingrese el número de documento" class="form-input" />
-                </div>
-
-                <div class="input-group">
-                  <label for="modal-celular">Celular</label>
-                  <input id="modal-celular" type="text" v-model="celular" placeholder="9 dígitos" maxlength="9" />
-                </div>
-
-                <div class="input-group">
-                  <label for="modal-rol">Rol del Sistema</label>
-                  <select id="modal-rol" v-model="rolSeleccionado">
-                    <option value="fisioterapeuta">Personal de Salud</option>
-                    <option value="enfermera">enfermera</option>
-                  </select>
-                </div>
-
-                <div class="input-group span-2">
-                  <label for="modal-email">Correo Electrónico Institucional *</label>
-                  <input id="modal-email" type="email" v-model="email" placeholder="usuario@unp.edu.pe" required />
-                </div>
-
-                <div class="input-group span-2">
-                  <label for="modal-password">Contraseña Temporal de Acceso *</label>
-                  <input id="modal-password" type="password" v-model="password" placeholder="Mínimo 6 caracteres"
-                    required />
-                </div>
-
-                <Transition name="slide-input">
-                  <div v-if="rolSeleccionado === 'fisioterapeuta'" class="form-grid span-2"
-                    style="margin-top: 0; gap: 1rem;">
-                    <div class="input-group">
-                      <label for="modal-tipo-personal">Área Médica *</label>
-                      <select id="modal-tipo-personal" v-model="tipoPersonal">
-                        <option value="medico">Médico General</option>
-                        <option value="enfermero">Enfermería</option>
-                        <option value="odontologo">Odontología</option>
-                        <option value="psicologo">Psicología</option>
-                        <option value="triaje">Triaje</option>
-                      </select>
-                    </div>
-
-                    <div class="input-group">
-                      <label for="modal-especialidad">Especialidad Terapéutica *</label>
-                      <input id="modal-especialidad" type="text" v-model="especialidad"
-                        placeholder="Ej: Medicina Familiar / Psicoterapia" required />
-                    </div>
-                  </div>
-                </Transition>
-
-              </div>
-
-              <div class="modal-actions">
-                <button type="button" class="btn-secondary" @click="showModal = false">Cancelar</button>
-                <button type="submit" class="btn-primary-submit" :disabled="loading">
-                  <span v-if="loading" class="btn-spinner"></span>
-                  <span v-else>Confirmar Registro</span>
-                </button>
-              </div>
-            </form>
-
-          </div>
-        </div>
-      </Transition>
     </div>
   </header>
 </template>
