@@ -39,3 +39,8 @@ __screenshots__/
 
 # Vite
 *.timestamp-*-*.mjs
+
+# Documentación interna y archivos de negocio
+docs/
+supabase/NIMA.txt
+supabase/*.pdf

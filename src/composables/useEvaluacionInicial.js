@@ -32,22 +32,10 @@ export const ZONAS_CORPORALES = [
   { id: 'tobillo_pie',      label: 'Tobillo y pie' },
 ]
 
-// ─── Nombres de las 16 columnas seccion_* (para iterar genéricamente) ─────
+// ─── Secciones activas en la ficha reducida ────────────────────────────────
 const SECCIONES = [
   'seccion_anamnesis',
   'seccion_dolor',
-  'seccion_inspeccion_postural',
-  'seccion_palpacion',
-  'seccion_rom_articular',
-  'seccion_rom_columna',
-  'seccion_eval_muscular',
-  'seccion_flexibilidad',
-  'seccion_neurologica',
-  'seccion_pruebas_funcionales',
-  'seccion_tests_ortopedicos',
-  'seccion_marcha_equilibrio',
-  'seccion_eval_funcional',
-  'seccion_escalas_funcionales',
   'seccion_diagnostico_fisio',
   'seccion_objetivos',
   'seccion_plan_tratamiento',
