@@ -83,7 +83,7 @@ const router = createRouter({
           name: 'HistoriaClinica',
           component: () => import('@/views/HistoriaClinicaView.vue'),
           props: true,
-          meta: { roles: ['fisioterapeuta', 'admin'] }
+          meta: { roles: ['fisioterapeuta', 'admin', 'enfermera'] }
         }
       ]
     },

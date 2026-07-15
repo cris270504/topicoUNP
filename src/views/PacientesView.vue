@@ -150,14 +150,6 @@ onMounted(() => {
                                 style="padding: 6px 14px; font-size: 12px; border-radius: 6px; margin-right: 8px; background: #ccfbf1; color: #0f766e">
                                     <i class="icono-historia"></i> Historia Clínica
                                 </button>
-                                <button v-if="!esFisioterapeuta" @click="openEditForm(paciente)" class="btn-secondary"
-                                    style="padding: 6px 14px; font-size: 12px; border-radius: 6px; margin-right: 8px;">
-                                    Editar
-                                </button>
-                                <button v-if="!esFisioterapeuta" @click="handleDeletePaciente(paciente.persona?.idpersona)" class="btn-secondary"
-                                    style="padding: 6px 14px; font-size: 12px; border-radius: 6px; background: #fee2e2; color: #ef4444;">
-                                    Eliminar
-                                </button>
                             </td>
                         </tr>
                         <tr v-if="filteredPacientes.length === 0">
